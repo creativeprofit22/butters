@@ -854,7 +854,16 @@ pub async fn scan_services(app: AppHandle) -> Result<ServicesResult, String> {
 pub async fn close_item(app: AppHandle, id: String, force: bool) -> Result<Outcome, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
-        let Some(target) = lock(&state.targets).get(&id).cloned() else {
+        close_target(&state, &id, force)
+    })
+    .await
+    .map_err(blocking_err)
+}
+
+/// Closes what the last scan listed under `id` and records what was freed.
+fn close_target(state: &AppState, id: &str, force: bool) -> Outcome {
+    {
+        let Some(target) = lock(&state.targets).get(id).cloned() else {
             return Outcome::Refused {
                 message: "List changed. Refresh.".into(),
             };
@@ -910,7 +919,7 @@ pub async fn close_item(app: AppHandle, id: String, force: bool) -> Result<Outco
             }
         };
         if let Outcome::Closed { freed, disk, .. } = &outcome {
-            lock(&state.targets).remove(&id);
+            lock(&state.targets).remove(id);
             let Some(kind) = target.memory_kind() else {
                 let mut h = lock(&state.history);
                 h.record_disk(*disk);
@@ -926,9 +935,7 @@ pub async fn close_item(app: AppHandle, id: String, force: bool) -> Result<Outco
             let _ = h.save(&state.history_path);
         }
         outcome
-    })
-    .await
-    .map_err(blocking_err)
+    }
 }
 
 #[tauri::command]
@@ -1192,5 +1199,71 @@ mod tests {
         assert_eq!(into.memory, 16 * 30 * MB);
         assert_eq!(into.detail.as_deref(), Some("16 folders"));
         assert_eq!(base_title("Vite ×dev"), "Vite ×dev");
+    }
+
+    fn state_in(name: &str) -> (AppState, PathBuf) {
+        let dir = std::env::temp_dir().join(format!("butters-app-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        (AppState::new(dir.join("settings.json")), dir)
+    }
+
+    fn procs(pid: u32, start: u64) -> Target {
+        Target::Procs {
+            key: "dev:sleeper".into(),
+            kind: Kind::DevServer,
+            target: ProcTarget {
+                title: "sleeper".into(),
+                members: vec![(pid, start)],
+                app_pid: None,
+                memory: 0,
+            },
+        }
+    }
+
+    #[test]
+    fn closing_an_id_the_last_scan_never_gave_is_refused() {
+        let (state, dir) = state_in("unknown");
+        let out = close_target(&state, "nope", true);
+        assert_eq!(
+            out,
+            Outcome::Refused {
+                message: "List changed. Refresh.".into()
+            }
+        );
+        assert_eq!(lock(&state.history).lifetime.closed, 0);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn closing_butters_itself_is_refused_and_the_row_stays() {
+        let (state, dir) = state_in("self");
+        lock(&state.targets).insert("1".into(), procs(std::process::id(), 0));
+        let out = close_target(&state, "1", true);
+        assert!(matches!(out, Outcome::Refused { .. }), "{out:?}");
+        assert!(lock(&state.targets).contains_key("1"));
+        assert_eq!(lock(&state.history).lifetime.closed, 0);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn force_closing_a_listed_process_stops_it_and_counts_it() {
+        let (state, dir) = state_in("force");
+        let (child, start) = actions::tests::spawn_sleeper();
+        let pid = child.id();
+        lock(&state.targets).insert("7".into(), procs(pid, start));
+        let reaper = std::thread::spawn(move || {
+            let mut c = child;
+            let _ = c.wait();
+        });
+        let out = close_target(&state, "7", true);
+        reaper.join().unwrap();
+        assert!(matches!(out, Outcome::Closed { .. }), "{out:?}");
+        assert!(!actions::tests::alive(pid));
+        assert!(!lock(&state.targets).contains_key("7"));
+        let saved = History::load(&state.history_path);
+        assert_eq!(saved.lifetime.closed, 1);
+        assert_eq!(saved.lifetime.by_kind["dev_server"], 1);
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

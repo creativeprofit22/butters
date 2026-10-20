@@ -94,6 +94,22 @@
         "Scope: re-check of the 2 findings recorded earlier today only",
         "Not checked: the gitleaks job has not run on GitHub yet (changes uncommitted); no new full secrets review"
       ]
+    },
+    "tests": {
+      "checkedAt": "2026-10-20T17:47:51.425Z",
+      "commit": "a6540bc",
+      "uncommittedChanges": true,
+      "result": "pass",
+      "summary": "Both findings fixed: close-safety tests now run on Windows too, and the close command path in app.rs is tested against real processes. Re-check of those 2 findings only.",
+      "findings": [],
+      "evidence": [
+        "actions.rs tests now cfg(test): Windows runs needs-force, forced close, reused pid, forbidden pid, pid 0-4 refusal, frontmost guard",
+        "app.rs: close_item body extracted to close_target; 3 tests: unknown id refused, self refused + row kept, real forced close saves history",
+        "cd src-tauri && cargo test -> 86 passed, 0 failed (Windows)",
+        "cargo clippy --all-targets -D warnings (with and without --features playground) -> clean; cargo fmt --check -> clean",
+        "Scope: re-check of the 2 findings recorded earlier today only",
+        "Not checked: Unix cfg branches not run here (no macOS/Linux host; CI will); WebKit e2e not run locally (browser not installed)"
+      ]
     }
   }
 }

@@ -313,16 +313,26 @@ pub fn close(target: &ProcTarget, force: bool, guard: &Guard) -> Outcome {
     }
 }
 
-#[cfg(all(test, unix))]
-mod tests {
+#[cfg(test)]
+pub(crate) mod tests {
     use super::*;
-    use std::process::{Child, Command};
+    use std::process::{Child, Command, Stdio};
 
-    fn spawn_sleeper() -> (Child, u64) {
-        let child = Command::new("sleep")
-            .arg("300")
+    /// Starts a real, windowless child that keeps running for minutes.
+    pub(crate) fn spawn_sleeper() -> (Child, u64) {
+        #[cfg(unix)]
+        let mut cmd = Command::new("sleep");
+        #[cfg(unix)]
+        cmd.arg("300");
+        #[cfg(windows)]
+        let mut cmd = Command::new("ping");
+        #[cfg(windows)]
+        cmd.args(["-n", "300", "127.0.0.1"]);
+        let child = cmd
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
             .spawn()
-            .expect("spawn sleep");
+            .expect("spawn sleeper");
         let mut sys = System::new();
         let pid = Pid::from_u32(child.id());
         sys.refresh_processes_specifics(
@@ -330,13 +340,25 @@ mod tests {
             true,
             ProcessRefreshKind::nothing(),
         );
-        let start = sys.process(pid).expect("sleep visible").start_time();
+        let start = sys.process(pid).expect("sleeper visible").start_time();
         (child, start)
+    }
+
+    /// Whether `pid` is running (zombies count as gone).
+    pub(crate) fn alive(pid: u32) -> bool {
+        let mut sys = System::new();
+        sys.refresh_processes_specifics(
+            ProcessesToUpdate::Some(&[Pid::from_u32(pid)]),
+            true,
+            ProcessRefreshKind::nothing(),
+        );
+        sys.process(Pid::from_u32(pid))
+            .is_some_and(|p| !is_zombie(p))
     }
 
     fn target(pid: u32, start: u64) -> ProcTarget {
         ProcTarget {
-            title: "sleep".into(),
+            title: "sleeper".into(),
             members: vec![(pid, start)],
             app_pid: None,
             memory: 0,
@@ -348,6 +370,38 @@ mod tests {
         let _ = c.wait();
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn windowless_console_process_needs_force_and_keeps_running() {
+        let (child, start) = spawn_sleeper();
+        let pid = child.id();
+        let guard = Guard {
+            forbidden: [0, 1, std::process::id()].into_iter().collect(),
+        };
+        let out = close(&target(pid, start), false, &guard);
+        assert!(matches!(out, Outcome::NeedsForce { .. }), "{out:?}");
+        assert!(alive(pid), "a polite request must not stop it");
+        reap(child);
+    }
+
+    #[test]
+    fn forced_close_stops_a_real_process() {
+        let (child, start) = spawn_sleeper();
+        let pid = child.id();
+        let guard = Guard {
+            forbidden: [0, 1, std::process::id()].into_iter().collect(),
+        };
+        let reaper = std::thread::spawn(move || {
+            let mut c = child;
+            let _ = c.wait();
+        });
+        let out = close(&target(pid, start), true, &guard);
+        assert!(matches!(out, Outcome::Closed { .. }), "{out:?}");
+        reaper.join().unwrap();
+        assert!(!alive(pid));
+    }
+
+    #[cfg(unix)]
     #[test]
     fn polite_close_stops_a_real_process() {
         let (child, start) = spawn_sleeper();
@@ -379,13 +433,7 @@ mod tests {
             "treated as already gone: {out:?}"
         );
         // The real process must still be alive.
-        let mut sys = System::new();
-        sys.refresh_processes_specifics(
-            ProcessesToUpdate::Some(&[Pid::from_u32(pid)]),
-            true,
-            ProcessRefreshKind::nothing(),
-        );
-        assert!(sys.process(Pid::from_u32(pid)).is_some());
+        assert!(alive(pid));
         reap(child);
     }
 
@@ -398,16 +446,31 @@ mod tests {
         };
         let out = close(&target(pid, start), true, &guard);
         assert!(matches!(out, Outcome::Refused { .. }), "{out:?}");
+        assert!(alive(pid));
         reap(child);
     }
 
     #[test]
-    fn init_and_group_pids_are_refused() {
+    fn init_pid_is_refused_even_without_a_guard() {
         let guard = Guard {
             forbidden: HashSet::new(),
         };
         let out = close(&target(1, 0), true, &guard);
         assert!(matches!(out, Outcome::Refused { .. }), "{out:?}");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_system_pids_are_never_force_stopped() {
+        // 0 is the idle process, 4 is System.
+        for pid in 0..=4 {
+            assert!(force_kill(pid).is_err(), "pid {pid}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn init_and_group_pids_are_never_signalled() {
         assert!(send_signal(0, libc::SIGTERM).is_err());
         assert!(send_signal(1, libc::SIGTERM).is_err());
         assert!(
@@ -422,5 +485,10 @@ mod tests {
         assert!(g.forbidden.contains(&std::process::id()));
         assert!(g.forbidden.contains(&0) && g.forbidden.contains(&1));
         assert!(g.forbidden.len() >= 4, "self, at least one parent, 0 and 1");
+    }
+
+    #[test]
+    fn guard_includes_the_frontmost_app() {
+        assert!(Guard::current(Some(987_654)).forbidden.contains(&987_654));
     }
 }
