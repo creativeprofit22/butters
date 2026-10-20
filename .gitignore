@@ -10,3 +10,8 @@ src-tauri/gen/schemas
 .env*
 test-results
 playwright-report
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.swp

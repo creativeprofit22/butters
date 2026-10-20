@@ -29,6 +29,21 @@
         "Not checked: no new full review; documented commands not run; DESIGN.md and docs/ not reviewed"
       ]
     },
+    "git-github": {
+      "checkedAt": "2026-10-20T15:08:42.971Z",
+      "commit": "208324b",
+      "uncommittedChanges": true,
+      "result": "pass",
+      "summary": "Both findings from today's review are fixed: ruleset protect-main now guards main on origin, and .gitignore covers Windows/editor files. Re-check of those 2 findings only.",
+      "findings": [],
+      "evidence": [
+        "gh api POST rulesets -> id 25484389 'protect-main' active on default branch: deletion, non_fast_forward, pull_request; admins bypass (release.sh still pushes)",
+        "gh api repos/creativeprofit22/butters/rules/branches/main -> deletion, non_fast_forward, pull_request",
+        "Edited .gitignore lines 13-17; git check-ignore -v confirms Thumbs.db, desktop.ini, .vscode/, .idea/, *.swp ignored",
+        "Scope: re-check of the 2 findings recorded earlier today only",
+        "Not checked: required CI status checks not added (fork has no Actions runs yet); upstream KenKaiii protection (no admin access)"
+      ]
+    },
     "naming": {
       "checkedAt": "2026-10-20T14:27:47.798Z",
       "commit": "5992028",
