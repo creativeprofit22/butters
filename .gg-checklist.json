@@ -61,6 +61,24 @@
         "Not checked: clippy (with or without playground), Playwright e2e, no new full vocabulary review"
       ]
     },
+    "quality-tools": {
+      "checkedAt": "2026-10-20T16:11:18.951Z",
+      "commit": "200ec23",
+      "uncommittedChanges": true,
+      "result": "pass",
+      "summary": "All 4 findings from today's review are fixed: Rust formatted and fmt-checked in CI, Biome added for the frontend, ruff set up for the Python scripts, release.sh pinned to LF with shellcheck in CI. Re-check of those 4 only.",
+      "findings": [],
+      "evidence": [
+        "cargo fmt run; cargo fmt --check -> pass; clippy -D warnings with and without --features playground -> pass; cargo test -> 75 passed",
+        "Added @biomejs/biome 2.5.15 (pinned), biome.json, scripts lint/format; pnpm lint (biome ci) -> 0 errors, 68 warnings (mostly noExplicitAny in e2e mocks); fixed 2 lint errors in App.svelte and drops.ts",
+        "pnpm check -> 0 errors/warnings; pnpm build -> ok; Playwright chromium -> 57 passed, 1 skipped",
+        "ruff.toml added; fixed F841 e2e/macos_app.py and E741 scripts/lab/lab.py; ruff check + ruff format --check -> pass",
+        ".gitattributes `*.sh text eol=lf`; release.sh SC2015 rewritten as if/then; shellcheck scripts/*.sh -> clean",
+        "ci.yml: rustfmt component, pnpm lint, cargo fmt --check, new scripts job (ruff + shellcheck)",
+        "Scope: re-check of the 4 findings recorded earlier today only",
+        "Not checked: WebKit e2e (not installed locally); CI not run yet; chromium 'rows warm the moment' timing test is flaky with and without these changes (2/6 baseline)"
+      ]
+    },
     "secrets": {
       "checkedAt": "2026-10-20T15:41:50.345Z",
       "commit": "510dce2",

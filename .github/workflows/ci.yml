@@ -27,13 +27,16 @@ jobs:
           cache: pnpm
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
-          components: clippy
+          components: clippy, rustfmt
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: src-tauri
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
+      - run: pnpm lint
       - run: pnpm build
+      - run: cargo fmt --check
+        working-directory: src-tauri
       - run: cargo clippy --all-targets -- -D warnings
         working-directory: src-tauri
       - run: cargo clippy --all-targets --features playground -- -D warnings
@@ -93,6 +96,18 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec playwright install --with-deps webkit chromium
       - run: pnpm test:e2e
+
+  # Lint + format checks for the Python helper scripts and the shell scripts.
+  scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: pipx install ruff==0.15.20
+      - run: ruff check --no-fix .
+      - run: ruff format --check .
+      - run: shellcheck scripts/*.sh
 
   audit:
     runs-on: ubuntu-latest
