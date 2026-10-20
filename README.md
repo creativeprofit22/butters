@@ -67,7 +67,7 @@ The only permission it asks for is notifications, for alerts. One click turns th
 
 ## Try it safely
 
-Want to see Butters close things without touching your own work? Build **Butters Playground** from source (`pnpm playground`, see below). It's a separate test app that starts seven throwaway processes (dev servers, an agent session, an MCP server, a busy build and a leaking process) and can only see those. Close them as often as you like, then hit **Reset**. Your real apps are invisible to it. It isn't part of the download.
+Want to see Butters close things without touching your own work? Build **Butters Playground** from source (`pnpm playground`, macOS only, see below). It's a separate test app that starts seven throwaway processes (dev servers, an agent session, an MCP server, a busy build and a leaking process) and can only see those. Close them as often as you like, then hit **Reset**. Your real apps are invisible to it. It isn't part of the download.
 
 ## Build it yourself
 
@@ -78,10 +78,12 @@ git clone https://github.com/KenKaiii/butters.git
 cd butters
 pnpm install
 pnpm tauri dev          # run it
-pnpm playground         # build Butters Playground
+pnpm playground         # build Butters Playground (macOS only)
 ```
 
-Tests: `cd src-tauri && cargo test` for the rules and safety checks, `pnpm test:e2e` for the panel. How it looks and moves is in [DESIGN.md](DESIGN.md). MIT licensed, so you can build on it.
+A release build (`pnpm tauri build`) also needs `TAURI_SIGNING_PRIVATE_KEY` set, because it signs the update files.
+
+Tests: `cd src-tauri && cargo test` for the rules and safety checks, `pnpm test:e2e` for the panel (run `pnpm exec playwright install webkit chromium` once first). How it looks and moves is in [DESIGN.md](DESIGN.md). MIT licensed, so you can build on it.
 
 ## Learn with me
 
