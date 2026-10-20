@@ -30,3 +30,5 @@ Tauri v2 tray/menu-bar app (macOS + Windows beta) that scores machine smoothness
 - Real-app test (macOS only): `pnpm tauri build --debug --bundles app --no-sign` then `python3 e2e/macos_app.py`. Needs pyobjc, Accessibility permission, `node`. It quits running Butters, uses a throwaway HOME, and clicks at fixed offsets from the panel's top-left — layout changes break it. Debug-only env: `BUTTERS_E2E_ONLY_PID` (only suggest that pid), `BUTTERS_E2E_ALERT`, `E2E_SHOT=1`.
 - `pnpm playground` is effectively macOS-only (`--bundles app`).
 <!-- gg:init:end -->
+
+Read CONTEXT.md before naming anything. Hard-to-reverse decisions are in `docs/adr/`; honour them or raise the conflict.
