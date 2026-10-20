@@ -722,7 +722,8 @@ pub async fn close_item(app: AppHandle, id: String, force: bool) -> Result<Outco
             let kind = match &target {
                 Target::Procs { kind, .. } => *kind,
                 Target::Container { .. } => Kind::DockerContainer,
-                Target::Model { .. } | Target::DockerDisk { .. } => Kind::OllamaModel,
+                Target::Model { .. } => Kind::OllamaModel,
+                Target::DockerDisk { .. } => Kind::DockerDisk,
             };
             let kind = serde_json::to_value(kind).ok().and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default();
             let mut h = lock(&state.history);
