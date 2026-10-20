@@ -58,7 +58,10 @@ impl Activity {
             std::fs::create_dir_all(dir)?;
         }
         let tmp = path.with_extension("json.tmp");
-        std::fs::write(&tmp, serde_json::to_vec(self).map_err(std::io::Error::other)?)?;
+        std::fs::write(
+            &tmp,
+            serde_json::to_vec(self).map_err(std::io::Error::other)?,
+        )?;
         std::fs::rename(&tmp, path)
     }
 
@@ -71,17 +74,32 @@ impl Activity {
                 None => {
                     let quiet = c.cpu < 1.0 && c.io < QUIET_SINCE_START;
                     match c.started_at {
-                        Some(started) if quiet && started <= now => Seen { io: c.io, last_active: started, lower_bound: false },
-                        _ => Seen { io: c.io, last_active: now, lower_bound: true },
+                        Some(started) if quiet && started <= now => Seen {
+                            io: c.io,
+                            last_active: started,
+                            lower_bound: false,
+                        },
+                        _ => Seen {
+                            io: c.io,
+                            last_active: now,
+                            lower_bound: true,
+                        },
                     }
                 }
                 Some(prev) => {
                     // Counters reset when a container restarts (io goes down).
                     let active = c.cpu >= 1.0 || c.io < prev.io || c.io - prev.io >= ACTIVE_DELTA;
                     if active {
-                        Seen { io: c.io, last_active: now, lower_bound: false }
+                        Seen {
+                            io: c.io,
+                            last_active: now,
+                            lower_bound: false,
+                        }
                     } else {
-                        Seen { io: c.io, ..prev.clone() }
+                        Seen {
+                            io: c.io,
+                            ..prev.clone()
+                        }
                     }
                 }
             };
@@ -91,7 +109,10 @@ impl Activity {
     }
 
     pub fn idle(&self, id: &str, now: u64) -> Option<Idle> {
-        self.containers.get(id).map(|s| Idle { secs: now.saturating_sub(s.last_active), lower_bound: s.lower_bound })
+        self.containers.get(id).map(|s| Idle {
+            secs: now.saturating_sub(s.last_active),
+            lower_bound: s.lower_bound,
+        })
     }
 }
 
@@ -102,17 +123,42 @@ mod tests {
     const DAY: u64 = 86_400;
 
     fn c(id: &str, io: u64, cpu: f32, started: u64) -> Container {
-        Container { id: id.into(), name: id.into(), io, cpu, started_at: Some(started), ..Default::default() }
+        Container {
+            id: id.into(),
+            name: id.into(),
+            io,
+            cpu,
+            started_at: Some(started),
+            ..Default::default()
+        }
     }
 
     #[test]
     fn untouched_since_start_counts_from_start() {
         let mut a = Activity::default();
         let now = 100 * DAY;
-        a.observe(&[c("db", 2_000_000, 0.1, now - 6 * DAY), c("api", 900_000_000, 0.2, now - 6 * DAY)], now);
-        assert_eq!(a.idle("db", now), Some(Idle { secs: 6 * DAY, lower_bound: false }));
+        a.observe(
+            &[
+                c("db", 2_000_000, 0.1, now - 6 * DAY),
+                c("api", 900_000_000, 0.2, now - 6 * DAY),
+            ],
+            now,
+        );
+        assert_eq!(
+            a.idle("db", now),
+            Some(Idle {
+                secs: 6 * DAY,
+                lower_bound: false
+            })
+        );
         // Lots of traffic at some point: we only know it's quiet since now.
-        assert_eq!(a.idle("api", now), Some(Idle { secs: 0, lower_bound: true }));
+        assert_eq!(
+            a.idle("api", now),
+            Some(Idle {
+                secs: 0,
+                lower_bound: true
+            })
+        );
     }
 
     #[test]
@@ -123,7 +169,13 @@ mod tests {
         a.observe(&[c("x", 50_000_100, 0.0, t0 - DAY)], t0 + 600); // a trickle: still idle
         assert_eq!(a.idle("x", t0 + 2 * DAY).unwrap().secs, 2 * DAY);
         a.observe(&[c("x", 51_000_000, 0.0, t0 - DAY)], t0 + 2 * DAY); // real traffic
-        assert_eq!(a.idle("x", t0 + 2 * DAY), Some(Idle { secs: 0, lower_bound: false }));
+        assert_eq!(
+            a.idle("x", t0 + 2 * DAY),
+            Some(Idle {
+                secs: 0,
+                lower_bound: false
+            })
+        );
         a.observe(&[c("x", 51_000_000, 4.0, t0 - DAY)], t0 + 3 * DAY); // busy CPU
         assert_eq!(a.idle("x", t0 + 3 * DAY).unwrap().secs, 0);
         a.observe(&[c("x", 10, 0.0, t0 + 3 * DAY)], t0 + 4 * DAY); // restarted: counters reset

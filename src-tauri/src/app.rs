@@ -13,15 +13,15 @@ use tauri::{AppHandle, Manager, State};
 
 use crate::actions::{self, Guard, Outcome, ProcTarget};
 use crate::alerts::{self, AlertState, Level};
+use crate::docker_activity::Activity;
 use crate::engine::assess::{self, Context, Verdict, fmt_bytes, fmt_duration};
 use crate::engine::model::{Group, Kind};
+use crate::history::{self, History, Summary};
 use crate::platform;
 use crate::sampler::{self, Sampler, Stats};
 use crate::services;
-use crate::docker_activity::Activity;
-use crate::history::{self, History, Summary};
-use crate::trends::{Culprit, Trends};
 use crate::settings::Settings;
+use crate::trends::{Culprit, Trends};
 
 const MB: u64 = 1024 * 1024;
 const GB_U: u64 = 1024 * MB;
@@ -42,29 +42,53 @@ impl Default for FrontTracker {
 
 impl FrontTracker {
     pub fn new() -> Self {
-        FrontTracker { self_pid: std::process::id(), last_front: None, recent: HashMap::new() }
+        FrontTracker {
+            self_pid: std::process::id(),
+            last_front: None,
+            recent: HashMap::new(),
+        }
     }
 
     pub fn poll(&mut self) {
         if let Some(pid) = platform::frontmost_pid()
-            && pid != self.self_pid {
-                self.last_front = Some(pid);
-                self.recent.insert(pid, Instant::now());
-            }
+            && pid != self.self_pid
+        {
+            self.last_front = Some(pid);
+            self.recent.insert(pid, Instant::now());
+        }
         self.recent.retain(|_, t| t.elapsed().as_secs() < 6 * 3600);
     }
 
     fn recent_secs(&self) -> HashMap<u32, u64> {
-        self.recent.iter().map(|(pid, t)| (*pid, t.elapsed().as_secs())).collect()
+        self.recent
+            .iter()
+            .map(|(pid, t)| (*pid, t.elapsed().as_secs()))
+            .collect()
     }
 }
 
 #[derive(Debug, Clone)]
 enum Target {
-    Procs { key: String, kind: Kind, target: ProcTarget },
-    Container { key: String, id: String, name: String, memory: u64 },
-    Model { key: String, name: String, memory: u64 },
-    DockerDisk { key: String, which: DiskWhich },
+    Procs {
+        key: String,
+        kind: Kind,
+        target: ProcTarget,
+    },
+    Container {
+        key: String,
+        id: String,
+        name: String,
+        memory: u64,
+    },
+    Model {
+        key: String,
+        name: String,
+        memory: u64,
+    },
+    DockerDisk {
+        key: String,
+        which: DiskWhich,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -77,7 +101,10 @@ enum DiskWhich {
 impl Target {
     fn key(&self) -> &str {
         match self {
-            Target::Procs { key, .. } | Target::Container { key, .. } | Target::Model { key, .. } | Target::DockerDisk { key, .. } => key,
+            Target::Procs { key, .. }
+            | Target::Container { key, .. }
+            | Target::Model { key, .. }
+            | Target::DockerDisk { key, .. } => key,
         }
     }
 
@@ -120,7 +147,10 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(settings_path: PathBuf) -> Self {
-        let dir = settings_path.parent().unwrap_or(std::path::Path::new(".")).to_path_buf();
+        let dir = settings_path
+            .parent()
+            .unwrap_or(std::path::Path::new("."))
+            .to_path_buf();
         let history_path = History::path(&dir);
         let docker_activity_path = Activity::path(&dir);
         AppState {
@@ -253,12 +283,22 @@ fn do_scan(state: &AppState) -> ScanResult {
     for a in assessed {
         let g = a.group;
         match a.verdict {
-            Verdict::Suggest { reason, recommended, note } => {
+            Verdict::Suggest {
+                reason,
+                recommended,
+                note,
+            } => {
                 if only.is_some_and(|pid| !g.members.contains(&pid)) {
                     continue;
                 }
                 // Identical leftovers (same tool, all orphaned) become one card.
-                let same = picked.iter_mut().find(|(p, r, _, _)| g.orphaned && p.orphaned && p.kind == g.kind && base_title(&p.title) == g.title && *r == reason);
+                let same = picked.iter_mut().find(|(p, r, _, _)| {
+                    g.orphaned
+                        && p.orphaned
+                        && p.kind == g.kind
+                        && base_title(&p.title) == g.title
+                        && *r == reason
+                });
                 match same {
                     Some((p, _, _, _)) => merge_into(p, g),
                     None => picked.push((g, reason, recommended, note)),
@@ -277,7 +317,11 @@ fn do_scan(state: &AppState) -> ScanResult {
     let mut targets: HashMap<String, Target> = HashMap::new();
     for (i, (g, reason, recommended, note)) in picked.into_iter().enumerate() {
         let id = format!("p{seq}-{i}");
-        let members: Vec<(u32, u64)> = g.members.iter().filter_map(|m| start_of.get(m).map(|s| (*m, *s))).collect();
+        let members: Vec<(u32, u64)> = g
+            .members
+            .iter()
+            .filter_map(|m| start_of.get(m).map(|s| (*m, *s)))
+            .collect();
         let polite = platform::can_ask_politely(g.app_pid, &g.members);
         let detail = match (&g.detail, g.ports.is_empty()) {
             (Some(d), false) => Some(format!("{d} · {}", ports_text(&g.ports))),
@@ -305,7 +349,12 @@ fn do_scan(state: &AppState) -> ScanResult {
             Target::Procs {
                 key: g.key.clone(),
                 kind: g.kind,
-                target: ProcTarget { title: g.title.clone(), members, app_pid: g.app_pid, memory: g.memory },
+                target: ProcTarget {
+                    title: g.title.clone(),
+                    members,
+                    app_pid: g.app_pid,
+                    memory: g.memory,
+                },
             },
         );
     }
@@ -314,13 +363,22 @@ fn do_scan(state: &AppState) -> ScanResult {
     for (i, (g, p)) in protected_groups.into_iter().enumerate() {
         let id = p.user_closable().then(|| format!("x{seq}-{i}"));
         if let Some(id) = &id {
-            let members: Vec<(u32, u64)> = g.members.iter().filter_map(|m| start_of.get(m).map(|s| (*m, *s))).collect();
+            let members: Vec<(u32, u64)> = g
+                .members
+                .iter()
+                .filter_map(|m| start_of.get(m).map(|s| (*m, *s)))
+                .collect();
             targets.insert(
                 id.clone(),
                 Target::Procs {
                     key: g.key.clone(),
                     kind: g.kind,
-                    target: ProcTarget { title: g.title.clone(), members, app_pid: g.app_pid, memory: g.memory },
+                    target: ProcTarget {
+                        title: g.title.clone(),
+                        members,
+                        app_pid: g.app_pid,
+                        memory: g.memory,
+                    },
                 },
             );
         }
@@ -335,12 +393,21 @@ fn do_scan(state: &AppState) -> ScanResult {
             reason: p.text(),
         });
     }
-    suggestions.sort_by(|a, b| b.recommended.cmp(&a.recommended).then(weight(b).total_cmp(&weight(a))));
+    suggestions.sort_by(|a, b| {
+        b.recommended
+            .cmp(&a.recommended)
+            .then(weight(b).total_cmp(&weight(a)))
+    });
 
     {
         let mut sw = lock(&state.sweepable);
         sw.retain(|id| !id.starts_with('p'));
-        sw.extend(suggestions.iter().filter(|s| sweepable(s)).map(|s| s.id.clone()));
+        sw.extend(
+            suggestions
+                .iter()
+                .filter(|s| sweepable(s))
+                .map(|s| s.id.clone()),
+        );
     }
     // Keep the latest service targets; replace process ones.
     {
@@ -367,8 +434,17 @@ fn base_title(t: &str) -> &str {
 
 /// Folds another leftover copy into `into`, counting copies in the title.
 fn merge_into(into: &mut Group, other: Group) {
-    let copies = into.title.rsplit_once(" ×").and_then(|(_, n)| n.parse::<usize>().ok()).unwrap_or(1) + 1;
-    let base = into.title.rsplit_once(" ×").map(|(b, _)| b.to_string()).unwrap_or_else(|| into.title.clone());
+    let copies = into
+        .title
+        .rsplit_once(" ×")
+        .and_then(|(_, n)| n.parse::<usize>().ok())
+        .unwrap_or(1)
+        + 1;
+    let base = into
+        .title
+        .rsplit_once(" ×")
+        .map(|(b, _)| b.to_string())
+        .unwrap_or_else(|| into.title.clone());
     into.title = format!("{base} ×{copies}");
     if into.detail != other.detail {
         into.detail = Some(format!("{copies} folders"));
@@ -406,7 +482,11 @@ fn weight(s: &Suggestion) -> f64 {
 fn ports_text(ports: &[u16]) -> String {
     let shown: Vec<String> = ports.iter().take(3).map(|p| format!(":{p}")).collect();
     let more = ports.len().saturating_sub(3);
-    if more > 0 { format!("{} +{more}", shown.join(" ")) } else { shown.join(" ") }
+    if more > 0 {
+        format!("{} +{more}", shown.join(" "))
+    } else {
+        shown.join(" ")
+    }
 }
 
 /// Playground builds: keep only the Playground's own test processes (and
@@ -449,7 +529,9 @@ fn playground_view(procs: &mut Vec<crate::engine::model::ProcInfo>) {
 fn e2e_only_pid() -> Option<u32> {
     #[cfg(debug_assertions)]
     {
-        std::env::var("BUTTERS_E2E_ONLY_PID").ok().and_then(|v| v.parse().ok())
+        std::env::var("BUTTERS_E2E_ONLY_PID")
+            .ok()
+            .and_then(|v| v.parse().ok())
     }
     #[cfg(not(debug_assertions))]
     {
@@ -466,7 +548,10 @@ fn observe_docker(state: &AppState, containers: Option<&[services::Container]>) 
             let mut act = lock(&state.docker_activity);
             act.observe(cs, now);
             let _ = act.save(&state.docker_activity_path);
-            let all_idle = !cs.is_empty() && cs.iter().all(|c| act.idle(&c.id, now).is_some_and(|i| i.secs >= DAY));
+            let all_idle = !cs.is_empty()
+                && cs
+                    .iter()
+                    .all(|c| act.idle(&c.id, now).is_some_and(|i| i.secs >= DAY));
             *lock(&state.containers) = Some(cs.len());
             *lock(&state.containers_all_idle) = Some(all_idle);
         }
@@ -502,7 +587,9 @@ fn do_scan_services(state: &AppState) -> ServicesResult {
         let key = format!("docker:{}", c.name);
         let idle = lock(&state.docker_activity).idle(&c.id, now);
         // Only containers measured quiet for an hour or more; a day pre-ticks it.
-        let Some(idle) = idle.filter(|i| i.secs >= 60 * 60) else { continue };
+        let Some(idle) = idle.filter(|i| i.secs >= 60 * 60) else {
+            continue;
+        };
         if c.cpu >= 1.0 || ignored.contains(&key) {
             continue;
         }
@@ -517,7 +604,11 @@ fn do_scan_services(state: &AppState) -> ServicesResult {
             kind: Kind::DockerContainer,
             title: format!("Container: {}", c.name),
             detail: Some(detail),
-            reason: format!("No activity {}{}", fmt_duration(idle.secs), if idle.lower_bound { "+" } else { "" }),
+            reason: format!(
+                "No activity {}{}",
+                fmt_duration(idle.secs),
+                if idle.lower_bound { "+" } else { "" }
+            ),
             note: None,
             memory: c.memory,
             cpu: c.cpu,
@@ -527,21 +618,58 @@ fn do_scan_services(state: &AppState) -> ServicesResult {
             verb: "Stop",
             disk: 0,
         });
-        targets.insert(id, Target::Container { key, id: c.id.clone(), name: c.name.clone(), memory: c.memory });
+        targets.insert(
+            id,
+            Target::Container {
+                key,
+                id: c.id.clone(),
+                name: c.name.clone(),
+                memory: c.memory,
+            },
+        );
     }
     // Disk Docker can give back without touching anything you use.
     if let Some(d) = disk {
         let cache_reason = match d.build_cache_idle {
-            Some(secs) if secs >= DAY => format!("Unused {}, rebuilds if needed", fmt_duration(secs)),
+            Some(secs) if secs >= DAY => {
+                format!("Unused {}, rebuilds if needed", fmt_duration(secs))
+            }
             _ => "Rebuilds when needed".to_string(),
         };
         let old_count = d.old_images.len();
         let old_bytes: u64 = d.old_images.iter().map(|i| i.size).sum();
         let old_refs: Vec<String> = d.old_images.iter().map(|i| i.reference.clone()).collect();
-        let old_detail = d.old_images.iter().map(|i| i.reference.rsplit('/').next().unwrap_or(&i.reference).to_string()).collect::<Vec<_>>().join(", ");
+        let old_detail = d
+            .old_images
+            .iter()
+            .map(|i| {
+                i.reference
+                    .rsplit('/')
+                    .next()
+                    .unwrap_or(&i.reference)
+                    .to_string()
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
         let items = [
-            (DiskWhich::BuildCache, "docker:build-cache", "Docker build cache".to_string(), cache_reason, None, d.build_cache, GB_U),
-            (DiskWhich::DanglingImages, "docker:dangling", "Untagged Docker images".to_string(), "Left over from rebuilds".to_string(), None, d.dangling_images, 500 * MB),
+            (
+                DiskWhich::BuildCache,
+                "docker:build-cache",
+                "Docker build cache".to_string(),
+                cache_reason,
+                None,
+                d.build_cache,
+                GB_U,
+            ),
+            (
+                DiskWhich::DanglingImages,
+                "docker:dangling",
+                "Untagged Docker images".to_string(),
+                "Left over from rebuilds".to_string(),
+                None,
+                d.dangling_images,
+                500 * MB,
+            ),
             (
                 DiskWhich::OldImages(old_refs),
                 "docker:old-images",
@@ -573,7 +701,13 @@ fn do_scan_services(state: &AppState) -> ServicesResult {
                 verb: "Clear",
                 disk: bytes,
             });
-            targets.insert(id, Target::DockerDisk { key: key.to_string(), which });
+            targets.insert(
+                id,
+                Target::DockerDisk {
+                    key: key.to_string(),
+                    which,
+                },
+            );
         }
     }
     for (i, m) in models.iter().flatten().enumerate() {
@@ -582,7 +716,10 @@ fn do_scan_services(state: &AppState) -> ServicesResult {
             continue;
         }
         let (reason, recommended) = match m.expires_in {
-            Some(s) if s <= 5 * 60 => (format!("Unloads in {}", fmt_duration(s.max(60) as u64)), false),
+            Some(s) if s <= 5 * 60 => (
+                format!("Unloads in {}", fmt_duration(s.max(60) as u64)),
+                false,
+            ),
             Some(s) => (format!("Kept {} more", fmt_duration(s as u64)), s > 30 * 60),
             None => ("Loaded".to_string(), false),
         };
@@ -603,7 +740,14 @@ fn do_scan_services(state: &AppState) -> ServicesResult {
             verb: "Unload",
             disk: 0,
         });
-        targets.insert(id, Target::Model { key, name: m.name.clone(), memory: m.size });
+        targets.insert(
+            id,
+            Target::Model {
+                key,
+                name: m.name.clone(),
+                memory: m.size,
+            },
+        );
     }
     {
         let mut t = lock(&state.targets);
@@ -613,11 +757,20 @@ fn do_scan_services(state: &AppState) -> ServicesResult {
     {
         let mut sw = lock(&state.sweepable);
         sw.retain(|id| id.starts_with('p'));
-        sw.extend(suggestions.iter().filter(|s| sweepable(s)).map(|s| s.id.clone()));
+        sw.extend(
+            suggestions
+                .iter()
+                .filter(|s| sweepable(s))
+                .map(|s| s.id.clone()),
+        );
     }
     let result = ServicesResult {
         suggestions,
-        docker: if containers.is_some() { "running" } else { "off" },
+        docker: if containers.is_some() {
+            "running"
+        } else {
+            "off"
+        },
         ollama: if models.is_some() { "running" } else { "off" },
     };
     *lock(&state.services_cache) = Some(result.clone());
@@ -663,7 +816,10 @@ pub fn smoothness(state: State<'_, AppState>) -> Summary {
 #[tauri::command]
 pub fn live_stats(state: State<'_, AppState>) -> LiveStats {
     let stats = lock(&state.sampler).quick_stats();
-    LiveStats { level: alerts::level(&stats), stats }
+    LiveStats {
+        level: alerts::level(&stats),
+        stats,
+    }
 }
 
 #[derive(Serialize)]
@@ -675,7 +831,9 @@ pub struct LiveStats {
 
 #[tauri::command]
 pub async fn scan(app: AppHandle) -> Result<ScanResult, String> {
-    tauri::async_runtime::spawn_blocking(move || do_scan(&app.state::<AppState>())).await.map_err(blocking_err)
+    tauri::async_runtime::spawn_blocking(move || do_scan(&app.state::<AppState>()))
+        .await
+        .map_err(blocking_err)
 }
 
 /// The last Docker/Ollama result, instantly (None before the first one).
@@ -687,7 +845,9 @@ pub fn cached_services(state: State<'_, AppState>) -> Option<ServicesResult> {
 
 #[tauri::command]
 pub async fn scan_services(app: AppHandle) -> Result<ServicesResult, String> {
-    tauri::async_runtime::spawn_blocking(move || do_scan_services(&app.state::<AppState>())).await.map_err(blocking_err)
+    tauri::async_runtime::spawn_blocking(move || do_scan_services(&app.state::<AppState>()))
+        .await
+        .map_err(blocking_err)
 }
 
 #[tauri::command]
@@ -695,30 +855,57 @@ pub async fn close_item(app: AppHandle, id: String, force: bool) -> Result<Outco
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
         let Some(target) = lock(&state.targets).get(&id).cloned() else {
-            return Outcome::Refused { message: "List changed. Refresh.".into() };
+            return Outcome::Refused {
+                message: "List changed. Refresh.".into(),
+            };
         };
         let outcome = match &target {
             Target::Procs { target, .. } => {
                 let frontmost = lock(&state.front).last_front;
                 actions::close(target, force, &Guard::current(frontmost))
             }
-            Target::Container { id: cid, name, memory, .. } => match services::docker_stop(cid) {
-                Ok(()) => Outcome::Closed { message: format!("Stopped {name}"), freed: *memory, disk: 0 },
-                Err(e) => Outcome::Failed { message: format!("Couldn't stop: {e}") },
+            Target::Container {
+                id: cid,
+                name,
+                memory,
+                ..
+            } => match services::docker_stop(cid) {
+                Ok(()) => Outcome::Closed {
+                    message: format!("Stopped {name}"),
+                    freed: *memory,
+                    disk: 0,
+                },
+                Err(e) => Outcome::Failed {
+                    message: format!("Couldn't stop: {e}"),
+                },
             },
             Target::Model { name, memory, .. } => match services::ollama_unload(name) {
-                Ok(()) => Outcome::Closed { message: format!("Unloaded {name}"), freed: *memory, disk: 0 },
-                Err(e) => Outcome::Failed { message: format!("Couldn't unload: {e}") },
+                Ok(()) => Outcome::Closed {
+                    message: format!("Unloaded {name}"),
+                    freed: *memory,
+                    disk: 0,
+                },
+                Err(e) => Outcome::Failed {
+                    message: format!("Couldn't unload: {e}"),
+                },
             },
             Target::DockerDisk { which, .. } => {
                 let r = match which {
                     DiskWhich::BuildCache => services::docker_prune_build_cache(),
                     DiskWhich::DanglingImages => services::docker_prune_dangling_images(),
-                    DiskWhich::OldImages(refs) => services::docker_remove_old_images(refs).map(|(_, bytes)| bytes),
+                    DiskWhich::OldImages(refs) => {
+                        services::docker_remove_old_images(refs).map(|(_, bytes)| bytes)
+                    }
                 };
                 match r {
-                    Ok(bytes) => Outcome::Closed { message: format!("Cleared {}", fmt_bytes(bytes)), freed: 0, disk: bytes },
-                    Err(e) => Outcome::Failed { message: format!("Couldn't clear: {e}") },
+                    Ok(bytes) => Outcome::Closed {
+                        message: format!("Cleared {}", fmt_bytes(bytes)),
+                        freed: 0,
+                        disk: bytes,
+                    },
+                    Err(e) => Outcome::Failed {
+                        message: format!("Couldn't clear: {e}"),
+                    },
                 }
             }
         };
@@ -730,7 +917,10 @@ pub async fn close_item(app: AppHandle, id: String, force: bool) -> Result<Outco
                 let _ = h.save(&state.history_path);
                 return outcome;
             };
-            let kind = serde_json::to_value(kind).ok().and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default();
+            let kind = serde_json::to_value(kind)
+                .ok()
+                .and_then(|v| v.as_str().map(str::to_string))
+                .unwrap_or_default();
             let mut h = lock(&state.history);
             h.record_freed(history::today(), *freed, &kind);
             let _ = h.save(&state.history_path);
@@ -743,14 +933,18 @@ pub async fn close_item(app: AppHandle, id: String, force: bool) -> Result<Outco
 
 #[tauri::command]
 pub fn ignore_item(state: State<'_, AppState>, id: String) -> Result<(), String> {
-    let key = lock(&state.targets).get(&id).map(|t| t.key().to_string()).ok_or("List changed. Refresh.")?;
+    let key = lock(&state.targets)
+        .get(&id)
+        .map(|t| t.key().to_string())
+        .ok_or("List changed. Refresh.")?;
     let mut s = lock(&state.settings);
     if !s.ignored.contains(&key) {
         s.ignored.push(key);
     }
     let cleaned = s.clone().sanitized();
     *s = cleaned;
-    s.save(&state.settings_path).map_err(|e| format!("Couldn't save settings: {e}"))
+    s.save(&state.settings_path)
+        .map_err(|e| format!("Couldn't save settings: {e}"))
 }
 
 #[tauri::command]
@@ -768,25 +962,35 @@ pub fn apply_shortcut(app: &AppHandle, old: &str) {
     }
     let new = lock(&app.state::<AppState>().settings).shortcut.clone();
     if !new.is_empty()
-        && let Err(e) = gs.register(new.as_str()) {
-            eprintln!("shortcut {new} unavailable: {e}");
-        }
+        && let Err(e) = gs.register(new.as_str())
+    {
+        eprintln!("shortcut {new} unavailable: {e}");
+    }
 }
 
 #[tauri::command]
-pub fn set_settings(app: AppHandle, state: State<'_, AppState>, settings: Settings) -> Result<Settings, String> {
+pub fn set_settings(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    settings: Settings,
+) -> Result<Settings, String> {
     use tauri_plugin_autostart::ManagerExt;
     let new = settings.sanitized();
     let auto = app.autolaunch();
     let currently = auto.is_enabled().unwrap_or(false);
     if new.launch_at_login != currently {
-        let r = if new.launch_at_login { auto.enable() } else { auto.disable() };
+        let r = if new.launch_at_login {
+            auto.enable()
+        } else {
+            auto.disable()
+        };
         r.map_err(|e| format!("Couldn't change login item: {e}"))?;
     }
     let (saved, old_shortcut) = {
         let mut s = lock(&state.settings);
         let old = std::mem::replace(&mut *s, new);
-        s.save(&state.settings_path).map_err(|e| format!("Couldn't save settings: {e}"))?;
+        s.save(&state.settings_path)
+            .map_err(|e| format!("Couldn't save settings: {e}"))?;
         (s.clone(), old.shortcut)
     };
     if saved.shortcut != old_shortcut {
@@ -798,7 +1002,9 @@ pub fn set_settings(app: AppHandle, state: State<'_, AppState>, settings: Settin
 #[cfg(feature = "playground")]
 #[tauri::command]
 pub async fn playground_reset() -> Result<crate::playground::PlaygroundStatus, String> {
-    tauri::async_runtime::spawn_blocking(|| crate::playground_state().reset()).await.map_err(blocking_err)?
+    tauri::async_runtime::spawn_blocking(|| crate::playground_state().reset())
+        .await
+        .map_err(blocking_err)?
 }
 
 #[cfg(feature = "playground")]
@@ -868,15 +1074,25 @@ pub fn spawn_background(app: AppHandle) {
                     let mut seen = lock(&state.leak_notified);
                     let leaks = t.leaks();
                     seen.retain(|k| leaks.iter().any(|l| (l.pid, l.start) == *k));
-                    leaks.into_iter().filter(|l| seen.insert((l.pid, l.start))).collect::<Vec<_>>()
+                    leaks
+                        .into_iter()
+                        .filter(|l| seen.insert((l.pid, l.start)))
+                        .collect::<Vec<_>>()
                 };
                 if let Some(l) = new_leaks.first()
-                    && lock(&state.settings).alerts && !panel_open {
-                        crate::permissions::notify(
-                            &app,
-                            &format!("{} grew {} in {}", l.label, fmt_bytes(l.growth.bytes), fmt_duration(l.growth.secs.max(60))),
-                        );
-                    }
+                    && lock(&state.settings).alerts
+                    && !panel_open
+                {
+                    crate::permissions::notify(
+                        &app,
+                        &format!(
+                            "{} grew {} in {}",
+                            l.label,
+                            fmt_bytes(l.growth.bytes),
+                            fmt_duration(l.growth.secs.max(60))
+                        ),
+                    );
+                }
                 // Docker activity every 10 minutes, even with the panel closed,
                 // so "no activity for 6 days" is measured, not guessed.
                 // Docker + Ollama every 10 minutes (and once right after start),
@@ -897,16 +1113,23 @@ pub fn spawn_background(app: AppHandle) {
                 }
                 let alert = lock(&state.alerts).check(&stats, Instant::now());
                 if let Some((_, msg)) = alert
-                    && lock(&state.settings).alerts && !panel_open {
-                        crate::permissions::notify(&app, msg);
-                    }
+                    && lock(&state.settings).alerts
+                    && !panel_open
+                {
+                    crate::permissions::notify(&app, msg);
+                }
             }
         })
         .expect("spawn background thread");
 }
 
 pub fn summary_line(stats: &Stats) -> String {
-    format!("Memory {} of {} · CPU {:.0}%", fmt_bytes(stats.mem_used), fmt_bytes(stats.mem_total), stats.cpu)
+    format!(
+        "Memory {} of {} · CPU {:.0}%",
+        fmt_bytes(stats.mem_used),
+        fmt_bytes(stats.mem_total),
+        stats.cpu
+    )
 }
 
 #[cfg(test)]
@@ -936,11 +1159,23 @@ mod tests {
 
     #[test]
     fn docker_clean_ups_free_disk_not_memory() {
-        let disk = Target::DockerDisk { key: "docker:build-cache".into(), which: DiskWhich::BuildCache };
+        let disk = Target::DockerDisk {
+            key: "docker:build-cache".into(),
+            which: DiskWhich::BuildCache,
+        };
         assert_eq!(disk.memory_kind(), None);
-        let model = Target::Model { key: "ollama:llama3".into(), name: "llama3".into(), memory: MB };
+        let model = Target::Model {
+            key: "ollama:llama3".into(),
+            name: "llama3".into(),
+            memory: MB,
+        };
         assert_eq!(model.memory_kind(), Some(Kind::OllamaModel));
-        let container = Target::Container { key: "docker:web".into(), id: "abc".into(), name: "web".into(), memory: MB };
+        let container = Target::Container {
+            key: "docker:web".into(),
+            id: "abc".into(),
+            name: "web".into(),
+            memory: MB,
+        };
         assert_eq!(container.memory_kind(), Some(Kind::DockerContainer));
     }
 

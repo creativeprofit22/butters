@@ -24,7 +24,9 @@ pub fn notify(app: &tauri::AppHandle, body: &str) {
     // prompt, which must not stall the background checks.
     let app = app.clone();
     let body = body.to_string();
-    let _ = std::thread::Builder::new().name("butters-notify".into()).spawn(move || imp::notify(&app, &body));
+    let _ = std::thread::Builder::new()
+        .name("butters-notify".into())
+        .spawn(move || imp::notify(&app, &body));
 }
 
 /// Call once at startup: lets a click on a Butters notification open the panel.
@@ -34,7 +36,9 @@ pub fn setup(app: &tauri::AppHandle) {
 
 #[tauri::command]
 pub async fn notify_permission() -> Notify {
-    tauri::async_runtime::spawn_blocking(imp::state).await.unwrap_or(Notify::On)
+    tauri::async_runtime::spawn_blocking(imp::state)
+        .await
+        .unwrap_or(Notify::On)
 }
 
 /// Asks the system (if it hasn't been asked yet), otherwise opens
@@ -64,9 +68,10 @@ mod imp {
     use objc2::{AnyThread, DefinedClass, define_class, msg_send};
     use objc2_foundation::{NSError, NSString, NSUUID};
     use objc2_user_notifications::{
-        UNAuthorizationOptions, UNAuthorizationStatus, UNMutableNotificationContent, UNNotification,
-        UNNotificationPresentationOptions, UNNotificationRequest, UNNotificationResponse, UNNotificationSettings,
-        UNNotificationSound, UNUserNotificationCenter, UNUserNotificationCenterDelegate,
+        UNAuthorizationOptions, UNAuthorizationStatus, UNMutableNotificationContent,
+        UNNotification, UNNotificationPresentationOptions, UNNotificationRequest,
+        UNNotificationResponse, UNNotificationSettings, UNNotificationSound,
+        UNUserNotificationCenter, UNUserNotificationCenterDelegate,
     };
     use tauri::AppHandle;
 
@@ -108,7 +113,8 @@ mod imp {
                 _notification: &UNNotification,
                 completion: &DynBlock<dyn Fn(UNNotificationPresentationOptions)>,
             ) {
-                completion.call((UNNotificationPresentationOptions::Banner | UNNotificationPresentationOptions::List,));
+                completion.call((UNNotificationPresentationOptions::Banner
+                    | UNNotificationPresentationOptions::List,));
             }
         }
     );
@@ -120,7 +126,8 @@ mod imp {
         let this = NotificationDelegate::alloc().set_ivars(DelegateIvars { app: app.clone() });
         // SAFETY: plain NSObject init on a freshly allocated instance.
         let delegate: Retained<NotificationDelegate> = unsafe { msg_send![super(this), init] };
-        UNUserNotificationCenter::currentNotificationCenter().setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
+        UNUserNotificationCenter::currentNotificationCenter()
+            .setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
         // The center only holds the delegate weakly; keep it for the app's lifetime.
         std::mem::forget(delegate);
     }
@@ -145,20 +152,27 @@ mod imp {
         content.setSound(Some(&UNNotificationSound::defaultSound()));
         content.setThreadIdentifier(&NSString::from_str("butters"));
         let id = NSUUID::new().UUIDString();
-        let request = UNNotificationRequest::requestWithIdentifier_content_trigger(&id, &content, None);
+        let request =
+            UNNotificationRequest::requestWithIdentifier_content_trigger(&id, &content, None);
         let done = RcBlock::new(|err: *mut NSError| {
             if !err.is_null() {
                 // SAFETY: non-null NSError passed by the system for this callback.
-                eprintln!("notification failed: {}", unsafe { &*err }.localizedDescription());
+                eprintln!(
+                    "notification failed: {}",
+                    unsafe { &*err }.localizedDescription()
+                );
             }
         });
-        UNUserNotificationCenter::currentNotificationCenter().addNotificationRequest_withCompletionHandler(&request, Some(&done));
+        UNUserNotificationCenter::currentNotificationCenter()
+            .addNotificationRequest_withCompletionHandler(&request, Some(&done));
     }
 
     /// UNUserNotificationCenter only works inside a real .app bundle;
     /// calling it from `cargo run`/tests would crash the process.
     fn bundled() -> bool {
-        std::env::current_exe().map(|p| p.to_string_lossy().contains(".app/Contents/MacOS/")).unwrap_or(false)
+        std::env::current_exe()
+            .map(|p| p.to_string_lossy().contains(".app/Contents/MacOS/"))
+            .unwrap_or(false)
     }
 
     pub fn state() -> Notify {
@@ -171,7 +185,8 @@ mod imp {
             let status = unsafe { settings.as_ref() }.authorizationStatus();
             let _ = tx.send(status);
         });
-        UNUserNotificationCenter::currentNotificationCenter().getNotificationSettingsWithCompletionHandler(&block);
+        UNUserNotificationCenter::currentNotificationCenter()
+            .getNotificationSettingsWithCompletionHandler(&block);
         match rx.recv_timeout(Duration::from_secs(3)) {
             Ok(UNAuthorizationStatus::NotDetermined) => Notify::Ask,
             Ok(UNAuthorizationStatus::Denied) => Notify::Off,
@@ -188,10 +203,11 @@ mod imp {
         let block = RcBlock::new(move |granted: Bool, _err: *mut NSError| {
             let _ = tx.send(granted.as_bool());
         });
-        UNUserNotificationCenter::currentNotificationCenter().requestAuthorizationWithOptions_completionHandler(
-            UNAuthorizationOptions::Alert | UNAuthorizationOptions::Sound,
-            &block,
-        );
+        UNUserNotificationCenter::currentNotificationCenter()
+            .requestAuthorizationWithOptions_completionHandler(
+                UNAuthorizationOptions::Alert | UNAuthorizationOptions::Sound,
+                &block,
+            );
         // The user may take a while to click Allow.
         match rx.recv_timeout(Duration::from_secs(120)) {
             Ok(true) => Notify::On,
@@ -216,7 +232,12 @@ mod imp {
 
     pub fn notify(app: &tauri::AppHandle, body: &str) {
         use tauri_plugin_notification::NotificationExt;
-        let _ = app.notification().builder().title("Butters").body(body).show();
+        let _ = app
+            .notification()
+            .builder()
+            .title("Butters")
+            .body(body)
+            .show();
     }
 
     pub fn state() -> Notify {
@@ -227,7 +248,9 @@ mod imp {
         Notify::On
     }
     pub fn open_settings() {
-        let _ = std::process::Command::new("explorer.exe").arg("ms-settings:notifications").status();
+        let _ = std::process::Command::new("explorer.exe")
+            .arg("ms-settings:notifications")
+            .status();
     }
 }
 
@@ -237,7 +260,12 @@ mod imp {
     pub fn setup(_app: &tauri::AppHandle) {}
     pub fn notify(app: &tauri::AppHandle, body: &str) {
         use tauri_plugin_notification::NotificationExt;
-        let _ = app.notification().builder().title("Butters").body(body).show();
+        let _ = app
+            .notification()
+            .builder()
+            .title("Butters")
+            .body(body)
+            .show();
     }
     pub fn state() -> Notify {
         Notify::On

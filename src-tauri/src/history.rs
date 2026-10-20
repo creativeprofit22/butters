@@ -64,7 +64,10 @@ pub struct History {
 }
 
 pub fn now_secs() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 pub fn today() -> u64 {
@@ -91,7 +94,13 @@ impl History {
     fn adopt_days(&mut self, now: u64) {
         let lt = &mut self.lifetime;
         if lt.since == 0 {
-            lt.since = self.days.iter().map(|d| d.day * 86_400).min().unwrap_or(now).min(now);
+            lt.since = self
+                .days
+                .iter()
+                .map(|d| d.day * 86_400)
+                .min()
+                .unwrap_or(now)
+                .min(now);
             if lt.freed == 0 && lt.closed == 0 {
                 lt.freed = self.days.iter().map(|d| d.freed).sum();
                 lt.closed = self.days.iter().map(|d| d.closed).sum();
@@ -105,13 +114,19 @@ impl History {
             std::fs::create_dir_all(dir)?;
         }
         let tmp = path.with_extension("json.tmp");
-        std::fs::write(&tmp, serde_json::to_vec(self).map_err(std::io::Error::other)?)?;
+        std::fs::write(
+            &tmp,
+            serde_json::to_vec(self).map_err(std::io::Error::other)?,
+        )?;
         std::fs::rename(&tmp, path)
     }
 
     fn day_mut(&mut self, day: u64) -> &mut Day {
         if self.days.last().is_none_or(|d| d.day != day) {
-            self.days.push(Day { day, ..Default::default() });
+            self.days.push(Day {
+                day,
+                ..Default::default()
+            });
             self.days.sort_by_key(|d| d.day);
             self.days.dedup_by_key(|d| d.day);
             let n = self.days.len();
@@ -119,7 +134,10 @@ impl History {
                 self.days.drain(..n - KEEP_DAYS);
             }
         }
-        self.days.iter_mut().find(|d| d.day == day).expect("just inserted")
+        self.days
+            .iter_mut()
+            .find(|d| d.day == day)
+            .expect("just inserted")
     }
 
     pub fn record_level(&mut self, day: u64, level: Level) {
@@ -157,7 +175,10 @@ impl History {
     }
 
     pub fn summary(&self, day: u64) -> Summary {
-        let week: Vec<u64> = (0..7).rev().map(|ago| self.freed_on(day.saturating_sub(ago))).collect();
+        let week: Vec<u64> = (0..7)
+            .rev()
+            .map(|ago| self.freed_on(day.saturating_sub(ago)))
+            .collect();
         Summary {
             score: self.days.iter().find(|d| d.day == day).and_then(Day::score),
             freed_today: self.freed_on(day),
@@ -168,7 +189,11 @@ impl History {
     }
 
     fn freed_on(&self, day: u64) -> u64 {
-        self.days.iter().find(|d| d.day == day).map(|d| d.freed).unwrap_or(0)
+        self.days
+            .iter()
+            .find(|d| d.day == day)
+            .map(|d| d.freed)
+            .unwrap_or(0)
     }
 }
 
@@ -239,7 +264,15 @@ mod tests {
     fn lifetime_outlives_the_14_day_window() {
         let mut h = History::default();
         for day in 1..=40 {
-            h.record_freed(day, 1_000, if day % 2 == 0 { "dev_server" } else { "agent_session" });
+            h.record_freed(
+                day,
+                1_000,
+                if day % 2 == 0 {
+                    "dev_server"
+                } else {
+                    "agent_session"
+                },
+            );
         }
         h.record_freed(40, 5_000, "mcp_server");
         assert_eq!(h.days.len(), KEEP_DAYS);

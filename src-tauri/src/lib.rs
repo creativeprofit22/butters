@@ -12,8 +12,8 @@ pub mod playground;
 pub mod sampler;
 pub mod services;
 pub mod settings;
-pub mod trends;
 pub mod sound;
+pub mod trends;
 pub mod updates;
 
 use tauri::Manager;
@@ -28,7 +28,9 @@ pub fn playground_state() -> &'static playground::Playground {
 pub fn run() {
     tauri::Builder::default()
         // Must be first: a second launch just opens the existing panel.
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| panel::open(app, None)))
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            panel::open(app, None)
+        }))
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_autostart::Builder::new().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -95,7 +97,9 @@ pub fn run() {
         .expect("error while starting Butters")
         .run(|_app, event| match event {
             // Closing the panel must not quit the app; only "Quit Butters" does.
-            tauri::RunEvent::ExitRequested { code: None, api, .. } => api.prevent_exit(),
+            tauri::RunEvent::ExitRequested {
+                code: None, api, ..
+            } => api.prevent_exit(),
             // The Playground cleans up every test process it started.
             #[cfg(feature = "playground")]
             tauri::RunEvent::Exit => playground_state().stop_all(),

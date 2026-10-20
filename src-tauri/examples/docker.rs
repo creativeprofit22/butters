@@ -9,17 +9,37 @@ fn main() {
         Some(cs) => {
             println!("running containers: {}", cs.len());
             for c in &cs {
-                println!("  {} ({}) cpu {:.1}% mem {} io {} started {:?} project {:?}", c.name, c.image, c.cpu, gb(c.memory), gb(c.io), c.started_at, c.project);
+                println!(
+                    "  {} ({}) cpu {:.1}% mem {} io {} started {:?} project {:?}",
+                    c.name,
+                    c.image,
+                    c.cpu,
+                    gb(c.memory),
+                    gb(c.io),
+                    c.started_at,
+                    c.project
+                );
             }
         }
     }
     if let Some(d) = services::docker_disk() {
-        println!("build cache: {} (last used {:?} s ago)", gb(d.build_cache), d.build_cache_idle);
+        println!(
+            "build cache: {} (last used {:?} s ago)",
+            gb(d.build_cache),
+            d.build_cache_idle
+        );
         println!("untagged images: {}", gb(d.dangling_images));
-        println!("old image versions: {} ({})", d.old_images.len(), gb(d.old_images.iter().map(|i| i.size).sum()));
+        println!(
+            "old image versions: {} ({})",
+            d.old_images.len(),
+            gb(d.old_images.iter().map(|i| i.size).sum())
+        );
         for i in &d.old_images {
             println!("  {}  {}", gb(i.size), i.reference);
         }
     }
-    println!("VM memory limit: {:?}", services::docker_vm_memory().map(gb));
+    println!(
+        "VM memory limit: {:?}",
+        services::docker_vm_memory().map(gb)
+    );
 }

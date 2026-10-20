@@ -49,20 +49,71 @@ const BUSY: &str = "for(;;){Math.sqrt(Math.random())}";
 const LEAK: &str = "const k=[];setInterval(()=>k.push(Buffer.alloc(20*1024*1024,1)),2000)";
 
 const ACTORS: &[Actor] = &[
-    Actor { label: "Vite dev server", path: "node_modules/vite/bin/vite.js", args: &["--port", "5173"], script: SERVER, orphan: true, project: "shop-web" },
-    Actor { label: "Next.js dev server", path: "node_modules/next/dist/bin/next", args: &["dev"], script: SERVER, orphan: true, project: "marketing-site" },
-    Actor { label: "Storybook", path: "node_modules/storybook/bin/index.js", args: &["dev"], script: SLOW, orphan: true, project: "design-system" },
-    Actor { label: "Claude Code session", path: "node_modules/@anthropic-ai/claude-code/cli.js", args: &[], script: IDLE, orphan: true, project: "api" },
-    Actor { label: "MCP server", path: "node_modules/@modelcontextprotocol/server-memory/dist/index.js", args: &[], script: IDLE, orphan: true, project: "api" },
-    Actor { label: "Busy build", path: "node_modules/webpack/bin/webpack.js", args: &["--watch"], script: BUSY, orphan: false, project: "shop-web" },
-    Actor { label: "Leaky process", path: "leaky-worker.js", args: &[], script: LEAK, orphan: false, project: "shop-web" },
+    Actor {
+        label: "Vite dev server",
+        path: "node_modules/vite/bin/vite.js",
+        args: &["--port", "5173"],
+        script: SERVER,
+        orphan: true,
+        project: "shop-web",
+    },
+    Actor {
+        label: "Next.js dev server",
+        path: "node_modules/next/dist/bin/next",
+        args: &["dev"],
+        script: SERVER,
+        orphan: true,
+        project: "marketing-site",
+    },
+    Actor {
+        label: "Storybook",
+        path: "node_modules/storybook/bin/index.js",
+        args: &["dev"],
+        script: SLOW,
+        orphan: true,
+        project: "design-system",
+    },
+    Actor {
+        label: "Claude Code session",
+        path: "node_modules/@anthropic-ai/claude-code/cli.js",
+        args: &[],
+        script: IDLE,
+        orphan: true,
+        project: "api",
+    },
+    Actor {
+        label: "MCP server",
+        path: "node_modules/@modelcontextprotocol/server-memory/dist/index.js",
+        args: &[],
+        script: IDLE,
+        orphan: true,
+        project: "api",
+    },
+    Actor {
+        label: "Busy build",
+        path: "node_modules/webpack/bin/webpack.js",
+        args: &["--watch"],
+        script: BUSY,
+        orphan: false,
+        project: "shop-web",
+    },
+    Actor {
+        label: "Leaky process",
+        path: "leaky-worker.js",
+        args: &[],
+        script: LEAK,
+        orphan: false,
+        project: "shop-web",
+    },
 ];
 
 /// The playground folder: ~/.butters-playground (the user's own space, no
 /// shared /tmp). Scripts are written fresh on every reset from the fixed
 /// strings above.
 fn root() -> Result<PathBuf, String> {
-    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).ok_or("No home folder")?;
+    let home = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .ok_or("No home folder")?;
     Ok(PathBuf::from(home).join(".butters-playground"))
 }
 
@@ -93,7 +144,10 @@ pub struct PlaygroundStatus {
 }
 
 fn node() -> Option<PathBuf> {
-    let mut candidates: Vec<PathBuf> = ["/opt/homebrew/bin/node", "/usr/local/bin/node"].iter().map(PathBuf::from).collect();
+    let mut candidates: Vec<PathBuf> = ["/opt/homebrew/bin/node", "/usr/local/bin/node"]
+        .iter()
+        .map(PathBuf::from)
+        .collect();
     if let Ok(home) = std::env::var("HOME") {
         let home = PathBuf::from(home);
         candidates.push(home.join(".volta/bin/node"));
@@ -110,7 +164,10 @@ fn node() -> Option<PathBuf> {
         }
     }
     if let Some(path) = std::env::var_os("PATH") {
-        candidates.extend(std::env::split_paths(&path).map(|d| d.join(if cfg!(windows) { "node.exe" } else { "node" })));
+        candidates.extend(
+            std::env::split_paths(&path)
+                .map(|d| d.join(if cfg!(windows) { "node.exe" } else { "node" })),
+        );
     }
     candidates.into_iter().find(|p| p.is_file())
 }
@@ -130,7 +187,8 @@ impl Playground {
     pub fn reset(&self) -> Result<PlaygroundStatus, String> {
         self.stop_all();
         stop_strays();
-        let node = node().ok_or("Node.js isn't installed, so the Playground can't start its test processes")?;
+        let node = node()
+            .ok_or("Node.js isn't installed, so the Playground can't start its test processes")?;
         let mut pids = self.pids.lock().map_err(|_| "busy")?;
         let mut children = self.children.lock().map_err(|_| "busy")?;
         for a in ACTORS {
@@ -174,7 +232,11 @@ impl Playground {
 
     pub fn status(&self) -> PlaygroundStatus {
         let running = self.pids().into_iter().filter(|p| alive(*p)).count();
-        PlaygroundStatus { running, total: ACTORS.len(), node: node().is_some() }
+        PlaygroundStatus {
+            running,
+            total: ACTORS.len(),
+            node: node().is_some(),
+        }
     }
 
     /// Kills every process the Playground started (on reset and on quit).
@@ -208,12 +270,21 @@ fn stop_strays() {
     sys.refresh_processes_specifics(
         sysinfo::ProcessesToUpdate::All,
         true,
-        sysinfo::ProcessRefreshKind::nothing().with_cmd(sysinfo::UpdateKind::Always).with_user(sysinfo::UpdateKind::Always),
+        sysinfo::ProcessRefreshKind::nothing()
+            .with_cmd(sysinfo::UpdateKind::Always)
+            .with_user(sysinfo::UpdateKind::Always),
     );
-    let my_uid = me.and_then(|m| sys.process(m)).and_then(|p| p.user_id().cloned());
+    let my_uid = me
+        .and_then(|m| sys.process(m))
+        .and_then(|p| p.user_id().cloned());
     for (pid, p) in sys.processes() {
         let ours = my_uid.is_some() && p.user_id() == my_uid.as_ref();
-        let in_playground = p.cmd().iter().skip(1).take(2).any(|a| a.to_string_lossy().starts_with(&root));
+        let in_playground = p
+            .cmd()
+            .iter()
+            .skip(1)
+            .take(2)
+            .any(|a| a.to_string_lossy().starts_with(&root));
         if ours && in_playground && Some(*pid) != me {
             kill(pid.as_u32());
         }
@@ -223,8 +294,13 @@ fn stop_strays() {
 fn alive(pid: u32) -> bool {
     let mut sys = sysinfo::System::new();
     let p = sysinfo::Pid::from_u32(pid);
-    sys.refresh_processes_specifics(sysinfo::ProcessesToUpdate::Some(&[p]), true, sysinfo::ProcessRefreshKind::nothing());
-    sys.process(p).is_some_and(|p| !matches!(p.status(), sysinfo::ProcessStatus::Zombie))
+    sys.refresh_processes_specifics(
+        sysinfo::ProcessesToUpdate::Some(&[p]),
+        true,
+        sysinfo::ProcessRefreshKind::nothing(),
+    );
+    sys.process(p)
+        .is_some_and(|p| !matches!(p.status(), sysinfo::ProcessStatus::Zombie))
 }
 
 fn kill(pid: u32) {
@@ -236,7 +312,11 @@ fn kill(pid: u32) {
     {
         let mut sys = sysinfo::System::new();
         let p = sysinfo::Pid::from_u32(pid);
-        sys.refresh_processes_specifics(sysinfo::ProcessesToUpdate::Some(&[p]), true, sysinfo::ProcessRefreshKind::nothing());
+        sys.refresh_processes_specifics(
+            sysinfo::ProcessesToUpdate::Some(&[p]),
+            true,
+            sysinfo::ProcessRefreshKind::nothing(),
+        );
         if let Some(proc_) = sys.process(p) {
             proc_.kill();
         }

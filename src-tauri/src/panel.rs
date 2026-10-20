@@ -9,7 +9,10 @@ use std::time::{Duration, Instant};
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Manager, PhysicalPosition, Rect, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
+use tauri::{
+    AppHandle, Manager, PhysicalPosition, Rect, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
+    WindowEvent,
+};
 
 use crate::alerts::Level;
 use crate::app::AppState;
@@ -50,15 +53,19 @@ pub fn hold(app: &AppHandle, on: bool) {
             *t = Some(Instant::now());
         }
         if let Some(w) = app.get_webview_window(PANEL)
-            && !LEAVING.load(Ordering::SeqCst) {
-                let _ = w.set_focus();
-            }
+            && !LEAVING.load(Ordering::SeqCst)
+        {
+            let _ = w.set_focus();
+        }
     }
 }
 
 fn held() -> bool {
     HOLD.load(Ordering::SeqCst)
-        || HOLD_RELEASED.lock().map(|t| t.is_some_and(|t| t.elapsed() < Duration::from_millis(600))).unwrap_or(false)
+        || HOLD_RELEASED
+            .lock()
+            .map(|t| t.is_some_and(|t| t.elapsed() < Duration::from_millis(600)))
+            .unwrap_or(false)
 }
 
 // Colour icons on every platform (not macOS template images), so the menu
@@ -73,7 +80,11 @@ pub fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
     TrayIconBuilder::with_id(TRAY)
         .icon(Image::from_bytes(TRAY_ICON)?)
         .icon_as_template(false)
-        .tooltip(if cfg!(feature = "playground") { "Butters Playground" } else { "Butters" })
+        .tooltip(if cfg!(feature = "playground") {
+            "Butters Playground"
+        } else {
+            "Butters"
+        })
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
@@ -82,7 +93,13 @@ pub fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
             _ => {}
         })
         .on_tray_icon_event(|tray, event| {
-            if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, rect, .. } = event {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                rect,
+                ..
+            } = event
+            {
                 toggle(tray.app_handle(), rect);
             }
         })
@@ -116,7 +133,9 @@ pub fn toggle_from_shortcut(app: &AppHandle) {
 }
 
 pub fn close(app: &AppHandle) {
-    let Some(w) = app.get_webview_window(PANEL) else { return };
+    let Some(w) = app.get_webview_window(PANEL) else {
+        return;
+    };
     if LEAVING.swap(true, Ordering::SeqCst) {
         return; // already on its way out
     }
@@ -128,9 +147,10 @@ pub fn close(app: &AppHandle) {
     std::thread::spawn(move || {
         std::thread::sleep(LEAVE);
         if GENERATION.load(Ordering::SeqCst) == generation
-            && let Some(w) = app.get_webview_window(PANEL) {
-                let _ = w.destroy();
-            }
+            && let Some(w) = app.get_webview_window(PANEL)
+        {
+            let _ = w.destroy();
+        }
     });
 }
 
@@ -170,11 +190,16 @@ pub fn open(app: &AppHandle, rect: Option<Rect>) {
     if let Ok(mut t) = OPENED_AT.lock() {
         *t = Some(Instant::now());
     }
-    state.panel_open.store(true, std::sync::atomic::Ordering::Relaxed);
+    state
+        .panel_open
+        .store(true, std::sync::atomic::Ordering::Relaxed);
     let handle = app.clone();
     win.on_window_event(move |event| match event {
         WindowEvent::Focused(false) => {
-            let settling = OPENED_AT.lock().map(|t| t.is_some_and(|t| t.elapsed() < Duration::from_millis(300))).unwrap_or(false);
+            let settling = OPENED_AT
+                .lock()
+                .map(|t| t.is_some_and(|t| t.elapsed() < Duration::from_millis(300)))
+                .unwrap_or(false);
             if !settling && !held() {
                 if let Ok(mut t) = CLOSED_BY_BLUR.lock() {
                     *t = Some(Instant::now());
@@ -183,7 +208,10 @@ pub fn open(app: &AppHandle, rect: Option<Rect>) {
             }
         }
         WindowEvent::Destroyed => {
-            handle.state::<AppState>().panel_open.store(false, std::sync::atomic::Ordering::Relaxed);
+            handle
+                .state::<AppState>()
+                .panel_open
+                .store(false, std::sync::atomic::Ordering::Relaxed);
         }
         _ => {}
     });
@@ -200,7 +228,12 @@ fn position(app: &AppHandle, win: &WebviewWindow, rect: Option<Rect>) {
     let gap = 6.0 * scale;
     let (side, top, bottom) = (MARGIN.0 * scale, MARGIN.1 * scale, MARGIN.2 * scale);
 
-    let tray = rect.map(|r| (r.position.to_physical::<f64>(scale), r.size.to_physical::<f64>(scale)));
+    let tray = rect.map(|r| {
+        (
+            r.position.to_physical::<f64>(scale),
+            r.size.to_physical::<f64>(scale),
+        )
+    });
     let monitor = match tray {
         Some((p, _)) => app.monitor_from_point(p.x, p.y).ok().flatten(),
         None => None,
@@ -215,7 +248,11 @@ fn position(app: &AppHandle, win: &WebviewWindow, rect: Option<Rect>) {
         Some((p, s)) => {
             let x = p.x + s.width / 2.0 - w / 2.0;
             let top_half = p.y < ay + ah / 2.0;
-            let y = if top_half { p.y + s.height + gap - top } else { p.y - h - gap + bottom };
+            let y = if top_half {
+                p.y + s.height + gap - top
+            } else {
+                p.y - h - gap + bottom
+            };
             (x, y)
         }
         None if cfg!(target_os = "macos") => (ax + aw - w - 2.0 * gap, ay + gap),
@@ -230,17 +267,30 @@ fn position(app: &AppHandle, win: &WebviewWindow, rect: Option<Rect>) {
 /// Tray tooltip shows the current state; the icon gains a dot when the
 /// machine is under strain.
 pub fn set_tray_level(app: &AppHandle, level: Level, stats: &Stats) {
-    let Some(tray) = app.tray_by_id(TRAY) else { return };
+    let Some(tray) = app.tray_by_id(TRAY) else {
+        return;
+    };
     let word = match level {
         Level::Smooth => "Running smooth",
         Level::Busy => "Getting busy",
         Level::Strained => "Under strain",
     };
-    let name = if cfg!(feature = "playground") { "Butters Playground" } else { "Butters" };
-    let _ = tray.set_tooltip(Some(format!("{name}: {word}\n{}", crate::app::summary_line(stats))));
+    let name = if cfg!(feature = "playground") {
+        "Butters Playground"
+    } else {
+        "Butters"
+    };
+    let _ = tray.set_tooltip(Some(format!(
+        "{name}: {word}\n{}",
+        crate::app::summary_line(stats)
+    )));
     let code = level as u8 + 1;
     if TRAY_LEVEL.swap(code, Ordering::Relaxed) != code {
-        let bytes = if level == Level::Strained { TRAY_ICON_ALERT } else { TRAY_ICON };
+        let bytes = if level == Level::Strained {
+            TRAY_ICON_ALERT
+        } else {
+            TRAY_ICON
+        };
         if let Ok(img) = Image::from_bytes(bytes) {
             let _ = tray.set_icon(Some(img));
             let _ = tray.set_icon_as_template(false);

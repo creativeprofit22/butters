@@ -18,7 +18,13 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { alerts: true, launch_at_login: false, sounds: true, shortcut: DEFAULT_SHORTCUT.to_string(), ignored: Vec::new() }
+        Settings {
+            alerts: true,
+            launch_at_login: false,
+            sounds: true,
+            shortcut: DEFAULT_SHORTCUT.to_string(),
+            ignored: Vec::new(),
+        }
     }
 }
 
@@ -47,7 +53,10 @@ impl Settings {
             std::fs::create_dir_all(dir)?;
         }
         let tmp = path.with_extension("json.tmp");
-        std::fs::write(&tmp, serde_json::to_vec_pretty(self).map_err(std::io::Error::other)?)?;
+        std::fs::write(
+            &tmp,
+            serde_json::to_vec_pretty(self).map_err(std::io::Error::other)?,
+        )?;
         std::fs::rename(&tmp, path)
     }
 
@@ -71,22 +80,42 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("butters-test-{}", std::process::id()));
         let path = Settings::path(&dir);
         assert_eq!(Settings::load(&path), Settings::default());
-        let s = Settings { alerts: false, launch_at_login: true, sounds: false, shortcut: "".into(), ignored: vec!["app:/x".into()] };
+        let s = Settings {
+            alerts: false,
+            launch_at_login: true,
+            sounds: false,
+            shortcut: "".into(),
+            ignored: vec!["app:/x".into()],
+        };
         s.save(&path).unwrap();
         assert_eq!(Settings::load(&path), s);
         std::fs::write(&path, b"{not json").unwrap();
         assert_eq!(Settings::load(&path), Settings::default());
         // Missing fields fall back to defaults.
         std::fs::write(&path, br#"{"alerts": false}"#).unwrap();
-        assert_eq!(Settings::load(&path), Settings { alerts: false, ..Settings::default() });
+        assert_eq!(
+            Settings::load(&path),
+            Settings {
+                alerts: false,
+                ..Settings::default()
+            }
+        );
         let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
     fn unknown_shortcuts_fall_back_to_default() {
-        let s = Settings { shortcut: "Super+Q".into(), ..Settings::default() }.sanitized();
+        let s = Settings {
+            shortcut: "Super+Q".into(),
+            ..Settings::default()
+        }
+        .sanitized();
         assert_eq!(s.shortcut, DEFAULT_SHORTCUT);
-        let off = Settings { shortcut: "".into(), ..Settings::default() }.sanitized();
+        let off = Settings {
+            shortcut: "".into(),
+            ..Settings::default()
+        }
+        .sanitized();
         assert_eq!(off.shortcut, "");
     }
 }

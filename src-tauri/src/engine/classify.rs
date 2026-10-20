@@ -7,13 +7,17 @@ use super::model::{Kind, ProcInfo};
 pub fn base(s: &str) -> String {
     let file = s.rsplit(['/', '\\']).next().unwrap_or(s);
     let lower = file.to_ascii_lowercase();
-    lower.strip_suffix(".exe").map(str::to_string).unwrap_or(lower)
+    lower
+        .strip_suffix(".exe")
+        .map(str::to_string)
+        .unwrap_or(lower)
 }
 
 /// Splits on anything that is not a letter or digit, for whole-word matching
 /// ("chrome-devtools-mcp" contains the word "mcp"; "mcpherson" does not).
 fn words(s: &str) -> impl Iterator<Item = &str> {
-    s.split(|c: char| !c.is_ascii_alphanumeric()).filter(|w| !w.is_empty())
+    s.split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|w| !w.is_empty())
 }
 
 fn has_word(s: &str, word: &str) -> bool {
@@ -27,12 +31,27 @@ const RUNTIMES: &[&str] = &[
 
 pub fn is_runtime(name: &str) -> bool {
     let n = base(name);
-    RUNTIMES.contains(&n.as_str()) || (n.starts_with("python3.") && n.len() <= 10) || n.starts_with("python3.1")
+    RUNTIMES.contains(&n.as_str())
+        || (n.starts_with("python3.") && n.len() <= 10)
+        || n.starts_with("python3.1")
 }
 
 const SHELLS: &[&str] = &[
-    "zsh", "bash", "fish", "sh", "dash", "tcsh", "csh", "ksh", "nu", "xonsh", "elvish", "pwsh",
-    "powershell", "cmd", "login",
+    "zsh",
+    "bash",
+    "fish",
+    "sh",
+    "dash",
+    "tcsh",
+    "csh",
+    "ksh",
+    "nu",
+    "xonsh",
+    "elvish",
+    "pwsh",
+    "powershell",
+    "cmd",
+    "login",
 ];
 
 /// Program name without the arguments some tools put in their process title
@@ -51,11 +70,9 @@ pub fn is_shell(p: &ProcInfo) -> bool {
 /// A shell the user types into, as opposed to `sh -c "..."` used as glue.
 pub fn is_interactive_shell(p: &ProcInfo) -> bool {
     is_shell(p)
-        && !p
-            .cmd
-            .iter()
-            .skip(1)
-            .any(|a| a == "-c" || a.eq_ignore_ascii_case("/c") || a.eq_ignore_ascii_case("-command"))
+        && !p.cmd.iter().skip(1).any(|a| {
+            a == "-c" || a.eq_ignore_ascii_case("/c") || a.eq_ignore_ascii_case("-command")
+        })
 }
 
 /// Launchers that start the real work in a child (`npm run dev` -> `vite`).
@@ -63,12 +80,33 @@ pub fn is_interactive_shell(p: &ProcInfo) -> bool {
 pub fn is_wrapper(p: &ProcInfo) -> bool {
     let n = prog(p);
     // npm runs as "node" but rewrites its argv to "npm run dev".
-    let a0 = p.cmd.first().map(|a| base(a)).and_then(|a| a.split_whitespace().next().map(str::to_string)).unwrap_or_default();
-    if [n.as_str(), a0.as_str()].iter().any(|x| matches!(
-        *x,
-        "npm" | "npx" | "pnpm" | "pnpx" | "yarn" | "bunx" | "uvx" | "turbo" | "nx" | "concurrently"
-            | "nodemon" | "make" | "just" | "cargo" | "poetry" | "pipenv"
-    )) {
+    let a0 = p
+        .cmd
+        .first()
+        .map(|a| base(a))
+        .and_then(|a| a.split_whitespace().next().map(str::to_string))
+        .unwrap_or_default();
+    if [n.as_str(), a0.as_str()].iter().any(|x| {
+        matches!(
+            *x,
+            "npm"
+                | "npx"
+                | "pnpm"
+                | "pnpx"
+                | "yarn"
+                | "bunx"
+                | "uvx"
+                | "turbo"
+                | "nx"
+                | "concurrently"
+                | "nodemon"
+                | "make"
+                | "just"
+                | "cargo"
+                | "poetry"
+                | "pipenv"
+        )
+    }) {
         return true;
     }
     if is_shell(p) && !is_interactive_shell(p) {
@@ -76,9 +114,19 @@ pub fn is_wrapper(p: &ProcInfo) -> bool {
     }
     let args = arg_text(p, 3);
     match n.as_str() {
-        "node" => ["npm-cli.js", "pnpm.cjs", "pnpm.mjs", "yarn.js", "yarn.cjs", "npx-cli.js", "concurrently", "nodemon", "turbo"]
-            .iter()
-            .any(|s| args.contains(s)),
+        "node" => [
+            "npm-cli.js",
+            "pnpm.cjs",
+            "pnpm.mjs",
+            "yarn.js",
+            "yarn.cjs",
+            "npx-cli.js",
+            "concurrently",
+            "nodemon",
+            "turbo",
+        ]
+        .iter()
+        .any(|s| args.contains(s)),
         "bun" | "uv" => p.cmd.get(1).is_some_and(|a| a == "run" || a == "x"),
         _ => false,
     }
@@ -88,7 +136,12 @@ pub fn is_wrapper(p: &ProcInfo) -> bool {
 /// argv[0..n] lowercased with `/` separators (Windows paths use `\\`), for
 /// package rules like "@google/gemini-cli".
 fn arg_text(p: &ProcInfo, n: usize) -> String {
-    p.cmd.iter().take(n).map(|a| a.to_ascii_lowercase().replace('\\', "/")).collect::<Vec<_>>().join(" ")
+    p.cmd
+        .iter()
+        .take(n)
+        .map(|a| a.to_ascii_lowercase().replace('\\', "/"))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 const AGENTS: &[(&str, &str)] = &[
@@ -212,8 +265,14 @@ const LANGUAGE_SERVERS: &[(&str, &str)] = &[
     ("kotlin-language-server", "Kotlin language server"),
     ("gradledaemon", "Gradle daemon"),
     ("kotlincompiledaemon", "Kotlin daemon"),
-    ("org.gradle.launcher.daemon.bootstrap.gradledaemon", "Gradle daemon"),
-    ("org.jetbrains.kotlin.daemon.kotlincompiledaemon", "Kotlin daemon"),
+    (
+        "org.gradle.launcher.daemon.bootstrap.gradledaemon",
+        "Gradle daemon",
+    ),
+    (
+        "org.jetbrains.kotlin.daemon.kotlincompiledaemon",
+        "Kotlin daemon",
+    ),
 ];
 
 /// Phone emulators: heavy, and easy to forget running after a build.
@@ -249,10 +308,15 @@ fn candidate_tokens(p: &ProcInfo) -> Vec<String> {
     let mut out = vec![stem(&p.name)];
     // Flutter runs as `dart ... flutter_tools.snapshot run`: the snapshot is the tool.
     if prog(p) == "dart"
-        && let Some(snap) = p.cmd.iter().find(|a| a.ends_with("flutter_tools.snapshot")) {
-            out.push(base(snap));
-        }
-    let program = p.cmd.first().map(|a| stem(a)).unwrap_or_else(|| stem(&p.name));
+        && let Some(snap) = p.cmd.iter().find(|a| a.ends_with("flutter_tools.snapshot"))
+    {
+        out.push(base(snap));
+    }
+    let program = p
+        .cmd
+        .first()
+        .map(|a| stem(a))
+        .unwrap_or_else(|| stem(&p.name));
     out.push(program.clone());
     // Only a runtime's *script* (or `python -m module`) names the real tool.
     // Later args are data (`--model gemini`) and must not change the verdict.
@@ -308,11 +372,16 @@ fn match_table(p: &ProcInfo, table: &[(&str, &str)]) -> Option<String> {
 /// True when a path in argv runs out of `node_modules/<pkg>/` (e.g. the real
 /// script of `vite` is `.../node_modules/vite/bin/vite.js`).
 fn package_dir_is(paths: &str, pkg: &str) -> bool {
-    paths.contains(&format!("node_modules/{pkg}/")) || paths.contains(&format!("node_modules\\{pkg}\\"))
+    paths.contains(&format!("node_modules/{pkg}/"))
+        || paths.contains(&format!("node_modules\\{pkg}\\"))
 }
 
 fn strip_ext(s: &str) -> String {
-    s.trim_end_matches(".js").trim_end_matches(".mjs").trim_end_matches(".cjs").trim_end_matches(".py").to_string()
+    s.trim_end_matches(".js")
+        .trim_end_matches(".mjs")
+        .trim_end_matches(".cjs")
+        .trim_end_matches(".py")
+        .to_string()
 }
 
 /// Name of the MCP server an argv token points at, if it points at one.
@@ -333,8 +402,13 @@ fn mcp_name(arg: &str) -> Option<String> {
     }
     for (i, seg) in segs.iter().enumerate().rev() {
         if seg.starts_with("@modelcontextprotocol") {
-            let next = segs.get(i + 1).map(|n| strip_ext(n.split('@').next().unwrap_or(n)));
-            return Some(next.map(|n| n.trim_start_matches("server-").to_string()).unwrap_or_else(|| "modelcontextprotocol".into()));
+            let next = segs
+                .get(i + 1)
+                .map(|n| strip_ext(n.split('@').next().unwrap_or(n)));
+            return Some(
+                next.map(|n| n.trim_start_matches("server-").to_string())
+                    .unwrap_or_else(|| "modelcontextprotocol".into()),
+            );
         }
         let clean = seg.split('@').find(|s| !s.is_empty()).unwrap_or(seg);
         if has_word(clean, "mcp") || has_word(clean, "fastmcp") {
@@ -359,7 +433,12 @@ fn mcp_name(arg: &str) -> Option<String> {
 fn is_mcp(p: &ProcInfo) -> Option<String> {
     // npm renames its process title to "npm exec @scope/pkg", so argv[0] can
     // hold several words; look at each of them as well as each argument.
-    let words: Vec<&str> = p.cmd.iter().take(4).flat_map(|a| a.split_whitespace()).collect();
+    let words: Vec<&str> = p
+        .cmd
+        .iter()
+        .take(4)
+        .flat_map(|a| a.split_whitespace())
+        .collect();
     for a in words {
         if a.starts_with('-') {
             continue;
@@ -393,10 +472,16 @@ pub fn classify_cli(p: &ProcInfo) -> Option<(Kind, String)> {
     }
     // Only the Android SDK's emulator (its own folder), not any qemu.
     if let Some(label) = match_table(p, EMULATORS)
-        && p.exe.as_deref().is_some_and(|e| e.contains("/emulator/") || e.to_ascii_lowercase().contains("android")) {
-            return Some((Kind::LocalModel, label));
-        }
-    let watching = p.cmd.iter().any(|a| a == "--watch" || a == "-w" || a == "watch");
+        && p.exe
+            .as_deref()
+            .is_some_and(|e| e.contains("/emulator/") || e.to_ascii_lowercase().contains("android"))
+    {
+        return Some((Kind::LocalModel, label));
+    }
+    let watching = p
+        .cmd
+        .iter()
+        .any(|a| a == "--watch" || a == "-w" || a == "watch");
     if let Some(label) = match_table(p, WATCHERS) {
         let n = base(&p.name);
         let always = matches!(label.as_str(), "Watchman" | "Turborepo daemon" | "Vitest");
@@ -408,7 +493,9 @@ pub fn classify_cli(p: &ProcInfo) -> Option<(Kind, String)> {
         // Generic words ("serve", "next", "expo"...) only count under a runtime
         // or as the program itself, and need a dev-ish verb for the ambiguous ones.
         let n = base(&p.name);
-        let program_is_tool = candidate_tokens(p).first().is_some_and(|t| DEV_SERVERS.iter().any(|(k, _)| k == t));
+        let program_is_tool = candidate_tokens(p)
+            .first()
+            .is_some_and(|t| DEV_SERVERS.iter().any(|(k, _)| k == t));
         if is_runtime(&n) || program_is_tool || !p.ports.is_empty() {
             return Some((Kind::DevServer, label));
         }
@@ -417,9 +504,10 @@ pub fn classify_cli(p: &ProcInfo) -> Option<(Kind, String)> {
     // `swift run`, `dotnet run`... (only from build folders, never installed apps).
     if !p.ports.is_empty()
         && let Some(exe) = p.exe.as_deref()
-        && is_dev_build(exe) {
-            return Some((Kind::DevServer, base(exe)));
-        }
+        && is_dev_build(exe)
+    {
+        return Some((Kind::DevServer, base(exe)));
+    }
     // Something on a port under a runtime we don't know by name: call it by
     // its runtime ("Node dev server"); the row's detail shows the project
     // folder, which is how people tell their servers apart.
@@ -453,7 +541,10 @@ pub fn app_root(exe: &str) -> Option<String> {
         if lower.starts_with("c:\\windows\\") || is_runtime(&n) || SHELLS.contains(&n.as_str()) {
             return None;
         }
-        if matches!(n.as_str(), "conhost" | "openconsole" | "git" | "ssh" | "cargo" | "rustc" | "uv") {
+        if matches!(
+            n.as_str(),
+            "conhost" | "openconsole" | "git" | "ssh" | "cargo" | "rustc" | "uv"
+        ) {
             return None;
         }
         return Some(exe.to_string());
@@ -489,8 +580,19 @@ pub fn runtime_label(name: &str) -> String {
 /// project. Never under /Applications, /System, /usr or Homebrew.
 pub fn is_dev_build(exe: &str) -> bool {
     let e = exe.replace('\\', "/").to_ascii_lowercase();
-    let installed = ["/applications/", "/system/", "/usr/", "/opt/homebrew/", "/library/", "c:/program files", "c:/windows/"];
-    if installed.iter().any(|p| e.starts_with(p) || e.contains(".app/")) {
+    let installed = [
+        "/applications/",
+        "/system/",
+        "/usr/",
+        "/opt/homebrew/",
+        "/library/",
+        "c:/program files",
+        "c:/windows/",
+    ];
+    if installed
+        .iter()
+        .any(|p| e.starts_with(p) || e.contains(".app/"))
+    {
         return false;
     }
     // `go run` builds into a temp folder like ".../go-build3412345/b001/exe/".
@@ -514,7 +616,8 @@ pub fn is_dev_build(exe: &str) -> bool {
 
 fn is_bundled_interpreter(exe: &str) -> bool {
     let lower = exe.to_ascii_lowercase();
-    (lower.contains("/python.framework/") || lower.contains("/resources/python.app/")) && lower.ends_with("/python")
+    (lower.contains("/python.framework/") || lower.contains("/resources/python.app/"))
+        && lower.ends_with("/python")
 }
 
 /// Friendly name for an app root ("/Applications/Google Chrome.app" -> "Google Chrome").
@@ -523,7 +626,11 @@ pub fn app_name(root: &str) -> String {
         return "iOS Simulator apps".into();
     }
     let file = root.rsplit(['/', '\\']).next().unwrap_or(root);
-    let stem = file.strip_suffix(".app").or_else(|| file.strip_suffix(".exe")).or_else(|| file.strip_suffix(".EXE")).unwrap_or(file);
+    let stem = file
+        .strip_suffix(".app")
+        .or_else(|| file.strip_suffix(".exe"))
+        .or_else(|| file.strip_suffix(".EXE"))
+        .unwrap_or(file);
     match stem.to_ascii_lowercase().as_str() {
         "chrome" => "Google Chrome".into(),
         "msedge" => "Microsoft Edge".into(),
@@ -539,19 +646,70 @@ pub fn app_name(root: &str) -> String {
 pub fn classify_app(name: &str) -> Kind {
     let n = name.to_ascii_lowercase();
     const BROWSERS: &[&str] = &[
-        "google chrome", "chrome", "chromium", "arc", "brave", "brave browser", "microsoft edge", "firefox",
-        "safari", "dia", "comet", "zen", "zen browser", "vivaldi", "opera", "orion", "helium", "thorium",
+        "google chrome",
+        "chrome",
+        "chromium",
+        "arc",
+        "brave",
+        "brave browser",
+        "microsoft edge",
+        "firefox",
+        "safari",
+        "dia",
+        "comet",
+        "zen",
+        "zen browser",
+        "vivaldi",
+        "opera",
+        "orion",
+        "helium",
+        "thorium",
     ];
     const TERMINALS: &[&str] = &[
-        "terminal", "iterm", "iterm2", "ghostty", "wezterm", "wezterm-gui", "alacritty", "kitty", "warp",
-        "hyper", "tabby", "wave", "windows terminal", "rio",
+        "terminal",
+        "iterm",
+        "iterm2",
+        "ghostty",
+        "wezterm",
+        "wezterm-gui",
+        "alacritty",
+        "kitty",
+        "warp",
+        "hyper",
+        "tabby",
+        "wave",
+        "windows terminal",
+        "rio",
     ];
     const EDITORS: &[&str] = &[
-        "vs code", "visual studio code", "code", "cursor", "windsurf", "zed", "intellij idea", "webstorm",
-        "pycharm", "rustrover", "goland", "android studio", "xcode", "sublime text", "nova", "fleet",
-        "trae", "kiro", "void", "positron",
+        "vs code",
+        "visual studio code",
+        "code",
+        "cursor",
+        "windsurf",
+        "zed",
+        "intellij idea",
+        "webstorm",
+        "pycharm",
+        "rustrover",
+        "goland",
+        "android studio",
+        "xcode",
+        "sublime text",
+        "nova",
+        "fleet",
+        "trae",
+        "kiro",
+        "void",
+        "positron",
     ];
-    const CONTAINERS: &[&str] = &["docker", "docker desktop", "orbstack", "podman desktop", "rancher desktop"];
+    const CONTAINERS: &[&str] = &[
+        "docker",
+        "docker desktop",
+        "orbstack",
+        "podman desktop",
+        "rancher desktop",
+    ];
     const MODELS: &[&str] = &["ollama", "lm studio", "jan", "msty", "gpt4all"];
     let n = n.as_str();
     if BROWSERS.contains(&n) || n.starts_with("google chrome") {
@@ -576,19 +734,85 @@ pub fn is_os_critical(p: &ProcInfo) -> bool {
     let n = base(&p.name);
     const NAMES: &[&str] = &[
         // macOS
-        "kernel_task", "launchd", "windowserver", "loginwindow", "dock", "finder", "systemuiserver",
-        "controlcenter", "notificationcenter", "coreservicesd", "cfprefsd", "distnoted", "usernoted",
-        "universalaccessd", "secd", "trustd", "sharingd", "coreaudiod", "spotlight", "mds", "mds_stores",
-        "mdworker", "mdworker_shared", "airportd", "bluetoothd", "powerd", "opendirectoryd", "securityd",
-        "tccd", "lsd", "runningboardd", "softwareupdated", "textinputmenuagent", "talagent", "pboard",
-        "fontd", "nsurlsessiond", "cloudd", "bird", "photoanalysisd", "watchdogd", "wallpaper",
-        "windowmanager", "backgroundtaskmanagementagent", "accessibilityuiserver",
+        "kernel_task",
+        "launchd",
+        "windowserver",
+        "loginwindow",
+        "dock",
+        "finder",
+        "systemuiserver",
+        "controlcenter",
+        "notificationcenter",
+        "coreservicesd",
+        "cfprefsd",
+        "distnoted",
+        "usernoted",
+        "universalaccessd",
+        "secd",
+        "trustd",
+        "sharingd",
+        "coreaudiod",
+        "spotlight",
+        "mds",
+        "mds_stores",
+        "mdworker",
+        "mdworker_shared",
+        "airportd",
+        "bluetoothd",
+        "powerd",
+        "opendirectoryd",
+        "securityd",
+        "tccd",
+        "lsd",
+        "runningboardd",
+        "softwareupdated",
+        "textinputmenuagent",
+        "talagent",
+        "pboard",
+        "fontd",
+        "nsurlsessiond",
+        "cloudd",
+        "bird",
+        "photoanalysisd",
+        "watchdogd",
+        "wallpaper",
+        "windowmanager",
+        "backgroundtaskmanagementagent",
+        "accessibilityuiserver",
         // Windows
-        "system", "registry", "smss", "csrss", "wininit", "winlogon", "services", "lsass", "svchost",
-        "dwm", "explorer", "sihost", "fontdrvhost", "ctfmon", "runtimebroker", "searchhost",
-        "startmenuexperiencehost", "shellexperiencehost", "textinputhost", "taskhostw", "dllhost",
-        "conhost", "audiodg", "spoolsv", "msmpeng", "securityhealthservice", "memory compression",
-        "vmmem", "vmmemwsl", "applicationframehost", "lockapp", "widgets", "secure system",
+        "system",
+        "registry",
+        "smss",
+        "csrss",
+        "wininit",
+        "winlogon",
+        "services",
+        "lsass",
+        "svchost",
+        "dwm",
+        "explorer",
+        "sihost",
+        "fontdrvhost",
+        "ctfmon",
+        "runtimebroker",
+        "searchhost",
+        "startmenuexperiencehost",
+        "shellexperiencehost",
+        "textinputhost",
+        "taskhostw",
+        "dllhost",
+        "conhost",
+        "audiodg",
+        "spoolsv",
+        "msmpeng",
+        "securityhealthservice",
+        "memory compression",
+        "vmmem",
+        "vmmemwsl",
+        "applicationframehost",
+        "lockapp",
+        "widgets",
+        "secure system",
     ];
     if NAMES.contains(&n.as_str()) {
         return true;
@@ -622,7 +846,14 @@ mod tests {
     fn recognises_agent_sessions() {
         let c = classify_cli(&proc("claude", &["claude", "--resume"])).unwrap();
         assert_eq!(c, (Kind::AgentSession, "Claude Code".into()));
-        let c = classify_cli(&proc("node", &["node", "/usr/local/lib/node_modules/@openai/codex/bin/codex.js"])).unwrap();
+        let c = classify_cli(&proc(
+            "node",
+            &[
+                "node",
+                "/usr/local/lib/node_modules/@openai/codex/bin/codex.js",
+            ],
+        ))
+        .unwrap();
         assert_eq!(c.0, Kind::AgentSession);
         assert_eq!(c.1, "Codex");
         let c = classify_cli(&proc("node", &["node", "/opt/homebrew/bin/ggcoder"])).unwrap();
@@ -637,11 +868,22 @@ mod tests {
 
     #[test]
     fn recognises_mcp_servers_by_whole_word() {
-        let c = classify_cli(&proc("node", &["node", "/x/node_modules/.bin/chrome-devtools-mcp"])).unwrap();
+        let c = classify_cli(&proc(
+            "node",
+            &["node", "/x/node_modules/.bin/chrome-devtools-mcp"],
+        ))
+        .unwrap();
         assert_eq!(c, (Kind::McpServer, "chrome-devtools-mcp".into()));
         let c = classify_cli(&proc("npx", &["npx", "-y", "@playwright/mcp@latest"])).unwrap();
         assert_eq!(c, (Kind::McpServer, "playwright".into()));
-        let c = classify_cli(&proc("node", &["node", "/x/@modelcontextprotocol/server-filesystem/dist/index.js"])).unwrap();
+        let c = classify_cli(&proc(
+            "node",
+            &[
+                "node",
+                "/x/@modelcontextprotocol/server-filesystem/dist/index.js",
+            ],
+        ))
+        .unwrap();
         assert_eq!(c, (Kind::McpServer, "filesystem".into()));
         assert!(classify_cli(&proc("node", &["node", "mcpherson.js"])).is_none());
     }
@@ -653,7 +895,11 @@ mod tests {
         let c = classify_cli(&proc("next-server (v15.1.0)", &["next-server (v15.1.0)"]));
         // Process titles with spaces still match on the leading word via ports or name.
         assert!(c.is_none() || c.unwrap().0 == Kind::DevServer);
-        let c = classify_cli(&proc("python3.12", &["python3.12", "-m", "uvicorn", "app:app", "--reload"])).unwrap();
+        let c = classify_cli(&proc(
+            "python3.12",
+            &["python3.12", "-m", "uvicorn", "app:app", "--reload"],
+        ))
+        .unwrap();
         assert_eq!(c.1, "Uvicorn");
     }
 
@@ -669,25 +915,57 @@ mod tests {
 
     #[test]
     fn watchers_need_watch_flag() {
-        assert!(classify_cli(&proc("node", &["node", "/p/node_modules/typescript/bin/tsc"])).is_none());
-        let c = classify_cli(&proc("node", &["node", "/p/node_modules/typescript/bin/tsc", "--watch"])).unwrap();
+        assert!(
+            classify_cli(&proc(
+                "node",
+                &["node", "/p/node_modules/typescript/bin/tsc"]
+            ))
+            .is_none()
+        );
+        let c = classify_cli(&proc(
+            "node",
+            &["node", "/p/node_modules/typescript/bin/tsc", "--watch"],
+        ))
+        .unwrap();
         assert_eq!(c.0, Kind::Watcher);
     }
 
     #[test]
     fn language_servers() {
-        let c = classify_cli(&proc("rust-analyzer", &["/Users/me/.vscode/extensions/rust-analyzer"])).unwrap();
+        let c = classify_cli(&proc(
+            "rust-analyzer",
+            &["/Users/me/.vscode/extensions/rust-analyzer"],
+        ))
+        .unwrap();
         assert_eq!(c.0, Kind::LanguageServer);
-        let c = classify_cli(&proc("node", &["node", "/p/node_modules/typescript/lib/tsserver.js"])).unwrap();
+        let c = classify_cli(&proc(
+            "node",
+            &["node", "/p/node_modules/typescript/lib/tsserver.js"],
+        ))
+        .unwrap();
         assert_eq!(c.0, Kind::LanguageServer);
     }
 
     #[test]
     fn wrappers_and_shells() {
         assert!(is_wrapper(&proc("npm", &["npm", "run", "dev"])));
-        assert!(is_wrapper(&proc("npm run dev", &["npm run dev"])), "npm renames its process title");
-        assert!(is_wrapper(&proc("node", &["npm run dev"])), "macOS reports npm as node");
-        assert!(is_wrapper(&proc("node", &["node", "/opt/homebrew/lib/node_modules/npm/bin/npm-cli.js", "run", "dev"])));
+        assert!(
+            is_wrapper(&proc("npm run dev", &["npm run dev"])),
+            "npm renames its process title"
+        );
+        assert!(
+            is_wrapper(&proc("node", &["npm run dev"])),
+            "macOS reports npm as node"
+        );
+        assert!(is_wrapper(&proc(
+            "node",
+            &[
+                "node",
+                "/opt/homebrew/lib/node_modules/npm/bin/npm-cli.js",
+                "run",
+                "dev"
+            ]
+        )));
         assert!(is_wrapper(&proc("sh", &["sh", "-c", "vite"])));
         assert!(!is_wrapper(&proc("zsh", &["-zsh"])));
         assert!(is_interactive_shell(&proc("-zsh", &["-zsh"])));
@@ -735,53 +1013,120 @@ mod tests {
     // ---- Cases found with the detection lab (scripts/lab) ----
 
     fn with_exe(name: &str, exe: &str, cmd: &[&str]) -> ProcInfo {
-        ProcInfo { exe: Some(exe.into()), ..proc(name, cmd) }
+        ProcInfo {
+            exe: Some(exe.into()),
+            ..proc(name, cmd)
+        }
     }
 
     #[test]
     fn homebrew_python_is_command_line_work_not_an_app() {
         let exe = "/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python";
-        assert_eq!(app_root(exe), None, "Python.app must not swallow every python tool");
+        assert_eq!(
+            app_root(exe),
+            None,
+            "Python.app must not swallow every python tool"
+        );
         // A real app is still an app.
         assert!(app_root("/Applications/Slack.app/Contents/MacOS/Slack").is_some());
-        let mut uv = with_exe("Python", exe, &[exe, "-m", "uvicorn", "main:app", "--reload"]);
+        let mut uv = with_exe(
+            "Python",
+            exe,
+            &[exe, "-m", "uvicorn", "main:app", "--reload"],
+        );
         uv.ports = vec![8000];
-        assert_eq!(classify_cli(&uv).unwrap(), (Kind::DevServer, "Uvicorn".into()));
+        assert_eq!(
+            classify_cli(&uv).unwrap(),
+            (Kind::DevServer, "Uvicorn".into())
+        );
         let mut dj = with_exe("Python", exe, &[exe, "/x/proj/manage.py", "runserver"]);
         dj.ports = vec![8001];
-        assert_eq!(classify_cli(&dj).unwrap(), (Kind::DevServer, "Django".into()));
+        assert_eq!(
+            classify_cli(&dj).unwrap(),
+            (Kind::DevServer, "Django".into())
+        );
         let jl = with_exe("Python", exe, &[exe, "-m", "jupyterlab"]);
         assert_eq!(classify_cli(&jl).unwrap().0, Kind::DevServer);
     }
 
     #[test]
     fn mobile_toolchains() {
-        let fl = proc("dart", &["dart", "--packages=x", "/x/flutter/bin/cache/flutter_tools.snapshot", "run"]);
-        assert_eq!(classify_cli(&fl).unwrap(), (Kind::DevServer, "Flutter".into()));
-        let rn = proc("node", &["node", "/x/app/node_modules/react-native/cli.js", "start"]);
+        let fl = proc(
+            "dart",
+            &[
+                "dart",
+                "--packages=x",
+                "/x/flutter/bin/cache/flutter_tools.snapshot",
+                "run",
+            ],
+        );
+        assert_eq!(
+            classify_cli(&fl).unwrap(),
+            (Kind::DevServer, "Flutter".into())
+        );
+        let rn = proc(
+            "node",
+            &["node", "/x/app/node_modules/react-native/cli.js", "start"],
+        );
         assert_eq!(classify_cli(&rn).unwrap().0, Kind::DevServer);
-        let gradle = proc("java", &["java", "-Xmx2g", "-cp", "/x/gradle-launcher-8.10.jar", "org.gradle.launcher.daemon.bootstrap.GradleDaemon", "8.10"]);
-        assert_eq!(classify_cli(&gradle).unwrap(), (Kind::LanguageServer, "Gradle daemon".into()));
-        let emu = with_exe("qemu-system-aarch64", "/Users/x/Library/Android/sdk/emulator/qemu/darwin-aarch64/qemu-system-aarch64", &["qemu-system-aarch64", "-avd", "Pixel_8"]);
-        assert_eq!(classify_cli(&emu).unwrap(), (Kind::LocalModel, "Android emulator".into()));
+        let gradle = proc(
+            "java",
+            &[
+                "java",
+                "-Xmx2g",
+                "-cp",
+                "/x/gradle-launcher-8.10.jar",
+                "org.gradle.launcher.daemon.bootstrap.GradleDaemon",
+                "8.10",
+            ],
+        );
+        assert_eq!(
+            classify_cli(&gradle).unwrap(),
+            (Kind::LanguageServer, "Gradle daemon".into())
+        );
+        let emu = with_exe(
+            "qemu-system-aarch64",
+            "/Users/x/Library/Android/sdk/emulator/qemu/darwin-aarch64/qemu-system-aarch64",
+            &["qemu-system-aarch64", "-avd", "Pixel_8"],
+        );
+        assert_eq!(
+            classify_cli(&emu).unwrap(),
+            (Kind::LocalModel, "Android emulator".into())
+        );
         // Some other qemu (a homebrew VM) is not an Android emulator.
-        let vm = with_exe("qemu-system-aarch64", "/opt/homebrew/bin/qemu-system-aarch64", &["qemu-system-aarch64"]);
+        let vm = with_exe(
+            "qemu-system-aarch64",
+            "/opt/homebrew/bin/qemu-system-aarch64",
+            &["qemu-system-aarch64"],
+        );
         assert!(classify_cli(&vm).is_none_or(|c| c.1 != "Android emulator"));
     }
 
     #[test]
     fn programs_you_built_listening_on_a_port() {
-        let mut go = with_exe("api", "/Users/x/Library/Caches/go-build/b001/exe/api", &["api"]);
+        let mut go = with_exe(
+            "api",
+            "/Users/x/Library/Caches/go-build/b001/exe/api",
+            &["api"],
+        );
         go.ports = vec![8080];
         assert_eq!(classify_cli(&go).unwrap(), (Kind::DevServer, "api".into()));
         let mut rs = with_exe("server", "/Users/x/proj/target/debug/server", &["server"]);
         rs.ports = vec![3000];
         assert_eq!(classify_cli(&rs).unwrap().0, Kind::DevServer);
         // Installed apps and system services on a port are not "dev builds".
-        let mut pg = with_exe("postgres", "/opt/homebrew/opt/postgresql@17/bin/postgres", &["postgres"]);
+        let mut pg = with_exe(
+            "postgres",
+            "/opt/homebrew/opt/postgresql@17/bin/postgres",
+            &["postgres"],
+        );
         pg.ports = vec![5432];
         assert!(classify_cli(&pg).is_none());
-        let mut ctl = with_exe("ControlCenter", "/System/Library/CoreServices/ControlCenter.app/Contents/MacOS/ControlCenter", &["ControlCenter"]);
+        let mut ctl = with_exe(
+            "ControlCenter",
+            "/System/Library/CoreServices/ControlCenter.app/Contents/MacOS/ControlCenter",
+            &["ControlCenter"],
+        );
         ctl.ports = vec![5000];
         assert!(classify_cli(&ctl).is_none());
         // Without a port, a built binary is just a program.
@@ -791,57 +1136,154 @@ mod tests {
 
     #[test]
     fn gg_coder_by_package_name() {
-        let gg = proc("node", &["/opt/homebrew/bin/node", "/x/node_modules/@kenkaiiii/ggcoder/dist/cli.js"]);
-        assert_eq!(classify_cli(&gg).unwrap(), (Kind::AgentSession, "GG Coder".into()));
+        let gg = proc(
+            "node",
+            &[
+                "/opt/homebrew/bin/node",
+                "/x/node_modules/@kenkaiiii/ggcoder/dist/cli.js",
+            ],
+        );
+        assert_eq!(
+            classify_cli(&gg).unwrap(),
+            (Kind::AgentSession, "GG Coder".into())
+        );
     }
 
     #[test]
     fn mcp_servers_are_named_by_their_package() {
         let via_npx = proc("npx", &["npx", "-y", "@playwright/mcp@latest"]);
-        assert_eq!(classify_cli(&via_npx).unwrap(), (Kind::McpServer, "playwright".into()));
-        let child = proc("node", &["/opt/homebrew/bin/node", "/x/node_modules/@playwright/mcp/cli.js"]);
-        assert_eq!(classify_cli(&child).unwrap(), (Kind::McpServer, "playwright".into()));
+        assert_eq!(
+            classify_cli(&via_npx).unwrap(),
+            (Kind::McpServer, "playwright".into())
+        );
+        let child = proc(
+            "node",
+            &[
+                "/opt/homebrew/bin/node",
+                "/x/node_modules/@playwright/mcp/cli.js",
+            ],
+        );
+        assert_eq!(
+            classify_cli(&child).unwrap(),
+            (Kind::McpServer, "playwright".into())
+        );
         let npm_exec = proc("npm", &["npm exec @playwright/mcp", "-e", "x"]);
-        assert_eq!(classify_cli(&npm_exec).unwrap(), (Kind::McpServer, "playwright".into()));
-        assert_eq!(classify_cli(&child).unwrap(), (Kind::McpServer, "playwright".into()));
-        let ctx7 = proc("node", &["node", "/x/node_modules/@upstash/context7-mcp/dist/index.js"]);
-        assert_eq!(classify_cli(&ctx7).unwrap(), (Kind::McpServer, "context7-mcp".into()));
+        assert_eq!(
+            classify_cli(&npm_exec).unwrap(),
+            (Kind::McpServer, "playwright".into())
+        );
+        assert_eq!(
+            classify_cli(&child).unwrap(),
+            (Kind::McpServer, "playwright".into())
+        );
+        let ctx7 = proc(
+            "node",
+            &[
+                "node",
+                "/x/node_modules/@upstash/context7-mcp/dist/index.js",
+            ],
+        );
+        assert_eq!(
+            classify_cli(&ctx7).unwrap(),
+            (Kind::McpServer, "context7-mcp".into())
+        );
     }
 
     #[test]
     fn unknown_servers_are_named_by_runtime_not_a_random_arg() {
         let mut deno = proc("deno", &["deno", "run", "-A", "--watch", "main.ts"]);
         deno.ports = vec![8000];
-        assert_eq!(classify_cli(&deno).unwrap(), (Kind::DevServer, "Deno".into()));
+        assert_eq!(
+            classify_cli(&deno).unwrap(),
+            (Kind::DevServer, "Deno".into())
+        );
         let mut php = proc("php", &["php", "-S", "127.0.0.1:8006"]);
         php.ports = vec![8006];
         assert_eq!(classify_cli(&php).unwrap(), (Kind::DevServer, "PHP".into()));
         let mut node = proc("node", &["node", "server.js"]);
         node.ports = vec![3000];
-        assert_eq!(classify_cli(&node).unwrap(), (Kind::DevServer, "Node".into()));
-        let rr = proc("node", &["node", "/x/node_modules/@react-router/dev/bin.js", "dev"]);
-        assert_eq!(classify_cli(&rr).unwrap(), (Kind::DevServer, "React Router".into()));
+        assert_eq!(
+            classify_cli(&node).unwrap(),
+            (Kind::DevServer, "Node".into())
+        );
+        let rr = proc(
+            "node",
+            &["node", "/x/node_modules/@react-router/dev/bin.js", "dev"],
+        );
+        assert_eq!(
+            classify_cli(&rr).unwrap(),
+            (Kind::DevServer, "React Router".into())
+        );
     }
 
     #[test]
     fn windows_paths_match_scoped_packages_and_mcp_names() {
-        let gem = proc("node.exe", &["node", r"C:\Users\me\AppData\Roaming\npm\node_modules\@google\gemini-cli\dist\index.js"]);
-        assert_eq!(classify_cli(&gem).unwrap(), (Kind::AgentSession, "Gemini CLI".into()));
-        let gg = proc("node.exe", &["node", r"C:\Users\me\AppData\Roaming\npm\node_modules\@kenkaiiii\ggcoder\dist\cli.js"]);
-        assert_eq!(classify_cli(&gg).unwrap(), (Kind::AgentSession, "GG Coder".into()));
-        let npx = proc("node.exe", &["node", r"C:\Program Files\nodejs\node_modules\npm\bin\npx-cli.js", "@playwright/mcp@latest"]);
-        assert_eq!(classify_cli(&npx).unwrap(), (Kind::McpServer, "playwright".into()));
+        let gem = proc(
+            "node.exe",
+            &[
+                "node",
+                r"C:\Users\me\AppData\Roaming\npm\node_modules\@google\gemini-cli\dist\index.js",
+            ],
+        );
+        assert_eq!(
+            classify_cli(&gem).unwrap(),
+            (Kind::AgentSession, "Gemini CLI".into())
+        );
+        let gg = proc(
+            "node.exe",
+            &[
+                "node",
+                r"C:\Users\me\AppData\Roaming\npm\node_modules\@kenkaiiii\ggcoder\dist\cli.js",
+            ],
+        );
+        assert_eq!(
+            classify_cli(&gg).unwrap(),
+            (Kind::AgentSession, "GG Coder".into())
+        );
+        let npx = proc(
+            "node.exe",
+            &[
+                "node",
+                r"C:\Program Files\nodejs\node_modules\npm\bin\npx-cli.js",
+                "@playwright/mcp@latest",
+            ],
+        );
+        assert_eq!(
+            classify_cli(&npx).unwrap(),
+            (Kind::McpServer, "playwright".into())
+        );
     }
 
     #[test]
     fn a_project_folder_named_mcp_is_not_an_mcp_server() {
-        let mut vite = proc("node", &["node", "/Users/me/code/my-mcp-app/node_modules/vite/bin/vite.js"]);
+        let mut vite = proc(
+            "node",
+            &[
+                "node",
+                "/Users/me/code/my-mcp-app/node_modules/vite/bin/vite.js",
+            ],
+        );
         vite.ports = vec![5173];
-        assert_eq!(classify_cli(&vite).unwrap(), (Kind::DevServer, "Vite".into()));
-        let real = proc("node", &["node", "/Users/me/code/my-mcp-app/node_modules/@playwright/mcp/cli.js"]);
-        assert_eq!(classify_cli(&real).unwrap(), (Kind::McpServer, "playwright".into()));
+        assert_eq!(
+            classify_cli(&vite).unwrap(),
+            (Kind::DevServer, "Vite".into())
+        );
+        let real = proc(
+            "node",
+            &[
+                "node",
+                "/Users/me/code/my-mcp-app/node_modules/@playwright/mcp/cli.js",
+            ],
+        );
+        assert_eq!(
+            classify_cli(&real).unwrap(),
+            (Kind::McpServer, "playwright".into())
+        );
         // A server you wrote yourself, run from its own folder, still counts.
-        let own = proc("node", &["node", "/Users/me/mcp-servers/github-mcp/index.js"]);
+        let own = proc(
+            "node",
+            &["node", "/Users/me/mcp-servers/github-mcp/index.js"],
+        );
         assert_eq!(classify_cli(&own).unwrap().0, Kind::McpServer);
     }
 }

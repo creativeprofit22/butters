@@ -49,7 +49,10 @@ async fn check(app: &AppHandle) -> Status {
         Ok(u) => u.check().await.map_err(short),
         Err(e) => Err(short(e)),
     };
-    let mut status = Status { current, ..Default::default() };
+    let mut status = Status {
+        current,
+        ..Default::default()
+    };
     match result {
         Ok(Some(update)) => {
             status.available = Some(update.version.clone());
@@ -83,7 +86,9 @@ pub async fn check_update(app: AppHandle) -> Status {
 #[tauri::command]
 pub async fn install_update(app: AppHandle) -> Result<(), String> {
     let state = app.state::<UpdateState>();
-    let update = lock(&state.pending).take().ok_or("No update ready. Check again.")?;
+    let update = lock(&state.pending)
+        .take()
+        .ok_or("No update ready. Check again.")?;
     lock(&state.status).installing = true;
     match update.download_and_install(|_, _| {}, || {}).await {
         Ok(()) => app.restart(),

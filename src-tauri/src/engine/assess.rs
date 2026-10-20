@@ -57,7 +57,10 @@ impl Protection {
     pub fn user_closable(&self) -> bool {
         matches!(
             self,
-            Protection::InUse | Protection::RecentlyUsed { .. } | Protection::InsideAppInUse { .. } | Protection::Ignored
+            Protection::InUse
+                | Protection::RecentlyUsed { .. }
+                | Protection::InsideAppInUse { .. }
+                | Protection::Ignored
         )
     }
 
@@ -78,7 +81,11 @@ impl Protection {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Verdict {
-    Suggest { reason: String, recommended: bool, note: Option<String> },
+    Suggest {
+        reason: String,
+        recommended: bool,
+        note: Option<String>,
+    },
     Protected(Protection),
     /// Not worth mentioning.
     Quiet,
@@ -162,12 +169,20 @@ fn orphaned(tree: &Tree, p: &ProcInfo) -> bool {
 fn is_daemon_by_design(label: &str) -> bool {
     matches!(
         label,
-        "Watchman" | "Turborepo daemon" | "Gradle daemon" | "Kotlin daemon" | "eslint_d" | "prettierd" | "Ollama"
+        "Watchman"
+            | "Turborepo daemon"
+            | "Gradle daemon"
+            | "Kotlin daemon"
+            | "eslint_d"
+            | "prettierd"
+            | "Ollama"
     )
 }
 
 fn shorten_home(path: &str) -> String {
-    let home = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")).unwrap_or_default();
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .unwrap_or_default();
     if !home.is_empty() && path.starts_with(&home) {
         format!("~{}", &path[home.len()..])
     } else {
@@ -188,7 +203,9 @@ pub fn build_groups(procs: &[ProcInfo], self_pid: u32) -> Vec<Group> {
         // (claude.exe, codex.exe, an Android emulator, a go-run server) is
         // command-line work instead. macOS apps live in .app bundles, so this
         // only affects plain executables.
-        if p.exe.as_deref().is_some_and(|e| !e.contains(".app/")) && classify::classify_cli(p).is_some() {
+        if p.exe.as_deref().is_some_and(|e| !e.contains(".app/"))
+            && classify::classify_cli(p).is_some()
+        {
             continue;
         }
         if let Some(root) = p.exe.as_deref().and_then(app_root) {
@@ -204,7 +221,10 @@ pub fn build_groups(procs: &[ProcInfo], self_pid: u32) -> Vec<Group> {
         let mut main = members
             .iter()
             .copied()
-            .filter(|pid| tree.parent(*pid).is_none_or(|pp| app_of.get(&pp) != Some(&root)))
+            .filter(|pid| {
+                tree.parent(*pid)
+                    .is_none_or(|pp| app_of.get(&pp) != Some(&root))
+            })
             .collect::<Vec<_>>();
         main.sort_by_key(|pid| tree.by_pid[pid].start_time);
         let app_pid = main.first().copied().or(members.first().copied());
@@ -243,14 +263,20 @@ pub fn build_groups(procs: &[ProcInfo], self_pid: u32) -> Vec<Group> {
             continue;
         }
         let Some(owner) = p.responsible else { continue };
-        if let Some(g) = groups.iter_mut().find(|g| g.app_pid.is_some() && g.members.contains(&owner)) {
+        if let Some(g) = groups
+            .iter_mut()
+            .find(|g| g.app_pid.is_some() && g.members.contains(&owner))
+        {
             g.members.push(p.pid);
             claimed.insert(p.pid);
         }
     }
 
     // 2. Command-line work: agent sessions, dev servers, MCP servers...
-    let mut by_start: Vec<&ProcInfo> = procs.iter().filter(|p| p.owned_by_user && !claimed.contains(&p.pid)).collect();
+    let mut by_start: Vec<&ProcInfo> = procs
+        .iter()
+        .filter(|p| p.owned_by_user && !claimed.contains(&p.pid))
+        .collect();
     // Parents before children: start time, then depth (Windows pids aren't
     // in start order and start times have one-second resolution).
     by_start.sort_by_key(|p| (p.start_time, tree.ancestors(p.pid).len(), p.pid));
@@ -258,12 +284,18 @@ pub fn build_groups(procs: &[ProcInfo], self_pid: u32) -> Vec<Group> {
         if claimed.contains(&p.pid) || p.pid == self_pid {
             continue;
         }
-        let Some((kind, label)) = classify_cli(p) else { continue };
+        let Some((kind, label)) = classify_cli(p) else {
+            continue;
+        };
         // Lift to the launcher (npm run dev -> vite): closing that is what the user means.
         let mut root = p.pid;
         while let Some(parent) = tree.parent(root) {
             let pp = tree.by_pid[&parent];
-            if !pp.owned_by_user || claimed.contains(&parent) || app_of.contains_key(&parent) || !classify::is_wrapper(pp) {
+            if !pp.owned_by_user
+                || claimed.contains(&parent)
+                || app_of.contains_key(&parent)
+                || !classify::is_wrapper(pp)
+            {
                 break;
             }
             root = parent;
@@ -271,7 +303,9 @@ pub fn build_groups(procs: &[ProcInfo], self_pid: u32) -> Vec<Group> {
         let members: Vec<u32> = tree
             .subtree(root)
             .into_iter()
-            .filter(|m| !claimed.contains(m) && !app_of.contains_key(m) && tree.by_pid[m].owned_by_user)
+            .filter(|m| {
+                !claimed.contains(m) && !app_of.contains_key(m) && tree.by_pid[m].owned_by_user
+            })
             .collect();
         if members.is_empty() {
             continue;
@@ -301,11 +335,22 @@ pub fn build_groups(procs: &[ProcInfo], self_pid: u32) -> Vec<Group> {
         let rp = tree.by_pid[&root];
         let cwd = p.cwd.as_deref().or(rp.cwd.as_deref()).map(shorten_home);
         claimed.extend(members.iter().copied());
-        let orphan = matches!(kind, Kind::AgentSession | Kind::McpServer | Kind::DevServer | Kind::Watcher | Kind::LanguageServer)
-            && !is_daemon_by_design(&label)
+        let orphan = matches!(
+            kind,
+            Kind::AgentSession
+                | Kind::McpServer
+                | Kind::DevServer
+                | Kind::Watcher
+                | Kind::LanguageServer
+        ) && !is_daemon_by_design(&label)
             && orphaned(&tree, rp);
         groups.push(Group {
-            key: format!("{}:{}:{}", kind_slug(kind), label, cwd.clone().unwrap_or_default()),
+            key: format!(
+                "{}:{}:{}",
+                kind_slug(kind),
+                label,
+                cwd.clone().unwrap_or_default()
+            ),
             kind,
             title: cli_title(kind, &label),
             detail: cwd,
@@ -336,11 +381,17 @@ pub fn build_groups(procs: &[ProcInfo], self_pid: u32) -> Vec<Group> {
         let members: Vec<u32> = tree
             .subtree(p.pid)
             .into_iter()
-            .filter(|m| !claimed.contains(m) && !app_of.contains_key(m) && tree.by_pid[m].owned_by_user)
+            .filter(|m| {
+                !claimed.contains(m) && !app_of.contains_key(m) && tree.by_pid[m].owned_by_user
+            })
             .collect();
         claimed.extend(members.iter().copied());
         let name = p.name.split_whitespace().next().unwrap_or(&p.name);
-        let name = name.strip_suffix(".exe").or_else(|| name.strip_suffix(".EXE")).unwrap_or(name).to_string();
+        let name = name
+            .strip_suffix(".exe")
+            .or_else(|| name.strip_suffix(".EXE"))
+            .unwrap_or(name)
+            .to_string();
         groups.push(Group {
             key: format!("process:{}", classify::base(&name)),
             kind: Kind::Process,
@@ -378,9 +429,10 @@ pub fn build_groups(procs: &[ProcInfo], self_pid: u32) -> Vec<Group> {
                 g.idle_is_lower_bound = p.idle_is_lower_bound;
             }
             if let Some(gr) = p.growth
-                && g.growth.is_none_or(|cur| gr.0 > cur.0) {
-                    g.growth = Some(gr);
-                }
+                && g.growth.is_none_or(|cur| gr.0 > cur.0)
+            {
+                g.growth = Some(gr);
+            }
         }
         g.idle_secs = if idle == u64::MAX { 0 } else { idle };
         g.ports.sort_unstable();
@@ -415,7 +467,11 @@ pub fn fmt_duration(secs: u64) -> String {
     } else if secs >= HOUR {
         let h = secs / HOUR;
         let m = (secs % HOUR) / MIN;
-        if m == 0 || h >= 10 { format!("{h} h") } else { format!("{h} h {m} min") }
+        if m == 0 || h >= 10 {
+            format!("{h} h")
+        } else {
+            format!("{h} h {m} min")
+        }
     } else {
         format!("{} min", (secs / MIN).max(1))
     }
@@ -437,7 +493,13 @@ fn quiet_for(g: &Group) -> String {
     }
 }
 
-fn protection(g: &Group, ctx: &Context, self_ancestors: &HashSet<u32>, procs: &HashMap<u32, &ProcInfo>, by_root: &HashMap<u32, &Group>) -> Option<Protection> {
+fn protection(
+    g: &Group,
+    ctx: &Context,
+    self_ancestors: &HashSet<u32>,
+    procs: &HashMap<u32, &ProcInfo>,
+    by_root: &HashMap<u32, &Group>,
+) -> Option<Protection> {
     if g.members.contains(&ctx.self_pid) {
         return Some(Protection::ThisApp);
     }
@@ -447,7 +509,9 @@ fn protection(g: &Group, ctx: &Context, self_ancestors: &HashSet<u32>, procs: &H
     let root = procs.get(&g.root)?;
     let is_app = g.app_pid.is_some();
     let system = if is_app {
-        g.key.contains("/System/Library/") || g.key.contains("/Library/Apple/") || g.key.to_ascii_lowercase().contains("c:\\windows\\")
+        g.key.contains("/System/Library/")
+            || g.key.contains("/Library/Apple/")
+            || g.key.to_ascii_lowercase().contains("c:\\windows\\")
     } else {
         classify::is_os_critical(root)
     };
@@ -458,18 +522,29 @@ fn protection(g: &Group, ctx: &Context, self_ancestors: &HashSet<u32>, procs: &H
         return Some(Protection::Simulator);
     }
     if let Some(front) = ctx.frontmost_pid
-        && g.members.contains(&front) {
-            return Some(Protection::InUse);
-        }
-    if let Some(mins) = g.members.iter().filter_map(|m| ctx.recent_pids.get(m)).min().filter(|s| **s < RECENT_SECS) {
-        return Some(Protection::RecentlyUsed { mins_ago: mins / MIN });
+        && g.members.contains(&front)
+    {
+        return Some(Protection::InUse);
+    }
+    if let Some(mins) = g
+        .members
+        .iter()
+        .filter_map(|m| ctx.recent_pids.get(m))
+        .min()
+        .filter(|s| **s < RECENT_SECS)
+    {
+        return Some(Protection::RecentlyUsed {
+            mins_ago: mins / MIN,
+        });
     }
     // Work running inside the app in front: protect it, except in terminals,
     // which host many unrelated sessions (only active ones are protected there).
     if let Some(host) = g.host_root.and_then(|h| by_root.get(&h)) {
         let host_in_front = ctx.frontmost_pid.is_some_and(|f| host.members.contains(&f));
         if host_in_front && (host.kind != Kind::Terminal || g.idle_secs < RECENT_SECS) {
-            return Some(Protection::InsideAppInUse { app: host.title.clone() });
+            return Some(Protection::InsideAppInUse {
+                app: host.title.clone(),
+            });
         }
     }
     if ctx.ignored.contains(&g.key) {
@@ -483,7 +558,11 @@ pub fn assess(procs: &[ProcInfo], ctx: &Context) -> Vec<Assessed> {
     let groups = build_groups(procs, ctx.self_pid);
     let tree = Tree::new(procs);
     let self_ancestors: HashSet<u32> = tree.ancestors(ctx.self_pid).into_iter().collect();
-    let by_root: HashMap<u32, &Group> = groups.iter().filter(|g| g.app_pid.is_some()).map(|g| (g.root, g)).collect();
+    let by_root: HashMap<u32, &Group> = groups
+        .iter()
+        .filter(|g| g.app_pid.is_some())
+        .map(|g| (g.root, g))
+        .collect();
 
     let mut out = Vec::with_capacity(groups.len());
     for g in &groups {
@@ -491,7 +570,10 @@ pub fn assess(procs: &[ProcInfo], ctx: &Context) -> Vec<Assessed> {
             Some(p) => Verdict::Protected(p),
             None => suggest(g, ctx, &by_root),
         };
-        out.push(Assessed { group: g.clone(), verdict });
+        out.push(Assessed {
+            group: g.clone(),
+            verdict,
+        });
     }
     out
 }
@@ -503,9 +585,15 @@ fn suggest(g: &Group, ctx: &Context, by_root: &HashMap<u32, &Group>) -> Verdict 
     let in_front_terminal = g
         .host_root
         .and_then(|h| by_root.get(&h))
-        .is_some_and(|host| host.kind == Kind::Terminal && ctx.frontmost_pid.is_some_and(|f| host.members.contains(&f)));
+        .is_some_and(|host| {
+            host.kind == Kind::Terminal
+                && ctx.frontmost_pid.is_some_and(|f| host.members.contains(&f))
+        });
     let note = in_front_terminal.then(|| {
-        format!("In open {}, check first", g.host_app.clone().unwrap_or_default())
+        format!(
+            "In open {}, check first",
+            g.host_app.clone().unwrap_or_default()
+        )
     });
     let s = |reason: String, recommended: bool| Verdict::Suggest {
         reason,
@@ -524,13 +612,23 @@ fn suggest(g: &Group, ctx: &Context, by_root: &HashMap<u32, &Group>) -> Verdict 
 
     // Leak watch: memory that keeps climbing is worth a look, whatever it is.
     if let Some((bytes, secs)) = g.growth
-        && g.kind != Kind::Terminal {
-            return s(format!("Grew {} in {}", fmt_bytes(bytes), fmt_duration(secs.max(MIN))), false);
-        }
+        && g.kind != Kind::Terminal
+    {
+        return s(
+            format!(
+                "Grew {} in {}",
+                fmt_bytes(bytes),
+                fmt_duration(secs.max(MIN))
+            ),
+            false,
+        );
+    }
 
     match g.kind {
         Kind::AgentSession => {
-            if (g.idle_secs >= 30 * MIN && heavy_enough) || (g.idle_secs >= 2 * HOUR && mem >= 50 * MB) {
+            if (g.idle_secs >= 30 * MIN && heavy_enough)
+                || (g.idle_secs >= 2 * HOUR && mem >= 50 * MB)
+            {
                 return s(quiet_for(g), g.idle_secs >= 2 * HOUR);
             }
         }
@@ -557,7 +655,12 @@ fn suggest(g: &Group, ctx: &Context, by_root: &HashMap<u32, &Group>) -> Verdict 
             }
         }
         Kind::Browser | Kind::Editor | Kind::App => {
-            let last_used = g.members.iter().filter_map(|m| ctx.recent_pids.get(m)).min().copied();
+            let last_used = g
+                .members
+                .iter()
+                .filter_map(|m| ctx.recent_pids.get(m))
+                .min()
+                .copied();
             let unused_for = last_used.unwrap_or(ctx.watched_secs);
             if ctx.watched_secs >= HOUR && unused_for >= HOUR && mem >= 800 * MB {
                 return s(format!("Unused {}", fmt_duration(unused_for)), false);
@@ -573,7 +676,10 @@ fn suggest(g: &Group, ctx: &Context, by_root: &HashMap<u32, &Group>) -> Verdict 
 
     if busy {
         let cli = g.app_pid.is_none();
-        return s(format!("Busy, {:.0}% CPU", g.cpu), cli && g.kind != Kind::Process);
+        return s(
+            format!("Busy, {:.0}% CPU", g.cpu),
+            cli && g.kind != Kind::Process,
+        );
     }
     Verdict::Quiet
 }
@@ -611,11 +717,27 @@ mod tests {
     }
 
     fn launchd() -> ProcInfo {
-        ProcInfo { pid: 1, parent: None, start_time: 0, name: "launchd".into(), exe: Some("/sbin/launchd".into()), owned_by_user: false, ..Default::default() }
+        ProcInfo {
+            pid: 1,
+            parent: None,
+            start_time: 0,
+            name: "launchd".into(),
+            exe: Some("/sbin/launchd".into()),
+            owned_by_user: false,
+            ..Default::default()
+        }
     }
 
     fn verdict_of<'a>(out: &'a [Assessed], title: &str) -> &'a Verdict {
-        &out.iter().find(|a| a.group.title == title).unwrap_or_else(|| panic!("no group {title}: {:?}", out.iter().map(|a| &a.group.title).collect::<Vec<_>>())).verdict
+        &out.iter()
+            .find(|a| a.group.title == title)
+            .unwrap_or_else(|| {
+                panic!(
+                    "no group {title}: {:?}",
+                    out.iter().map(|a| &a.group.title).collect::<Vec<_>>()
+                )
+            })
+            .verdict
     }
 
     /// A terminal with a shell running `npm run dev` (vite) and a Claude Code session.
@@ -625,10 +747,20 @@ mod tests {
             app(10, 1, "Ghostty", "ghostty"),
             p(11, 10, "zsh", &["-zsh"]),
             p(12, 11, "npm", &["npm", "run", "dev"]),
-            p(13, 12, "node", &["node", "/Users/me/proj/node_modules/vite/bin/vite.js"]),
+            p(
+                13,
+                12,
+                "node",
+                &["node", "/Users/me/proj/node_modules/vite/bin/vite.js"],
+            ),
             p(14, 10, "zsh", &["-zsh"]),
             p(15, 14, "claude", &["claude"]),
-            p(16, 15, "node", &["node", "/x/node_modules/.bin/chrome-devtools-mcp"]),
+            p(
+                16,
+                15,
+                "node",
+                &["node", "/x/node_modules/.bin/chrome-devtools-mcp"],
+            ),
             app(20, 1, "Google Chrome", "Google Chrome"),
             app(21, 20, "Google Chrome", "Google Chrome Helper (Renderer)"),
         ];
@@ -639,13 +771,23 @@ mod tests {
     #[test]
     fn groups_launcher_with_its_dev_server_and_session_with_its_mcp() {
         let groups = build_groups(&workstation(), 999);
-        let vite = groups.iter().find(|g| g.title == "Vite dev server").unwrap();
+        let vite = groups
+            .iter()
+            .find(|g| g.title == "Vite dev server")
+            .unwrap();
         assert_eq!(vite.root, 12, "npm launcher is the root");
         assert_eq!(vite.members, vec![12, 13]);
         assert_eq!(vite.ports, vec![5173]);
         assert_eq!(vite.host_app.as_deref(), Some("Ghostty"));
-        let claude = groups.iter().find(|g| g.title == "Claude Code session").unwrap();
-        assert_eq!(claude.members, vec![15, 16], "MCP child closes with its session");
+        let claude = groups
+            .iter()
+            .find(|g| g.title == "Claude Code session")
+            .unwrap();
+        assert_eq!(
+            claude.members,
+            vec![15, 16],
+            "MCP child closes with its session"
+        );
         let chrome = groups.iter().find(|g| g.title == "Google Chrome").unwrap();
         assert_eq!(chrome.app_pid, Some(20));
         assert_eq!(chrome.members.len(), 2);
@@ -657,30 +799,58 @@ mod tests {
         let mut procs = workstation();
         procs[8].cpu = 300.0;
         procs[8].memory = 6 * GB;
-        let ctx = Context { self_pid: 999, frontmost_pid: Some(21), watched_secs: 5 * HOUR, ..Default::default() };
+        let ctx = Context {
+            self_pid: 999,
+            frontmost_pid: Some(21),
+            watched_secs: 5 * HOUR,
+            ..Default::default()
+        };
         let out = assess(&procs, &ctx);
-        assert_eq!(verdict_of(&out, "Google Chrome"), &Verdict::Protected(Protection::InUse));
+        assert_eq!(
+            verdict_of(&out, "Google Chrome"),
+            &Verdict::Protected(Protection::InUse)
+        );
     }
 
     #[test]
     fn recently_used_app_is_protected() {
         let mut procs = workstation();
         procs[8].memory = 6 * GB;
-        let mut ctx = Context { self_pid: 999, watched_secs: 5 * HOUR, ..Default::default() };
+        let mut ctx = Context {
+            self_pid: 999,
+            watched_secs: 5 * HOUR,
+            ..Default::default()
+        };
         ctx.recent_pids.insert(20, 5 * MIN);
         let out = assess(&procs, &ctx);
-        assert_eq!(verdict_of(&out, "Google Chrome"), &Verdict::Protected(Protection::RecentlyUsed { mins_ago: 5 }));
+        assert_eq!(
+            verdict_of(&out, "Google Chrome"),
+            &Verdict::Protected(Protection::RecentlyUsed { mins_ago: 5 })
+        );
     }
 
     #[test]
     fn unused_heavy_app_is_suggested_only_after_watching_long_enough() {
         let mut procs = workstation();
         procs[8].memory = 2 * GB;
-        let ctx = Context { self_pid: 999, watched_secs: 10 * MIN, ..Default::default() };
-        assert_eq!(verdict_of(&assess(&procs, &ctx), "Google Chrome"), &Verdict::Quiet);
-        let ctx = Context { self_pid: 999, watched_secs: 3 * HOUR, ..Default::default() };
+        let ctx = Context {
+            self_pid: 999,
+            watched_secs: 10 * MIN,
+            ..Default::default()
+        };
+        assert_eq!(
+            verdict_of(&assess(&procs, &ctx), "Google Chrome"),
+            &Verdict::Quiet
+        );
+        let ctx = Context {
+            self_pid: 999,
+            watched_secs: 3 * HOUR,
+            ..Default::default()
+        };
         match verdict_of(&assess(&procs, &ctx), "Google Chrome") {
-            Verdict::Suggest { recommended, .. } => assert!(!recommended, "apps are never pre-selected"),
+            Verdict::Suggest { recommended, .. } => {
+                assert!(!recommended, "apps are never pre-selected")
+            }
             v => panic!("{v:?}"),
         }
     }
@@ -690,10 +860,16 @@ mod tests {
         let mut procs = workstation();
         procs.push(p(30, 14, "cargo", &["cargo", "run"]));
         procs.push(p(31, 30, "butters", &["butters"]));
-        let ctx = Context { self_pid: 31, ..Default::default() };
+        let ctx = Context {
+            self_pid: 31,
+            ..Default::default()
+        };
         let out = assess(&procs, &ctx);
         // The terminal Butters was launched from is off-limits.
-        assert_eq!(verdict_of(&out, "Ghostty"), &Verdict::Protected(Protection::LaunchedButters));
+        assert_eq!(
+            verdict_of(&out, "Ghostty"),
+            &Verdict::Protected(Protection::LaunchedButters)
+        );
     }
 
     #[test]
@@ -702,9 +878,16 @@ mod tests {
         for pr in procs.iter_mut() {
             pr.idle_secs = 3 * HOUR;
         }
-        let ctx = Context { self_pid: 999, ..Default::default() };
+        let ctx = Context {
+            self_pid: 999,
+            ..Default::default()
+        };
         match verdict_of(&assess(&procs, &ctx), "Vite dev server") {
-            Verdict::Suggest { reason, recommended, note } => {
+            Verdict::Suggest {
+                reason,
+                recommended,
+                note,
+            } => {
                 assert_eq!(reason, "Idle 3 h");
                 assert!(*recommended);
                 assert!(note.is_none());
@@ -712,7 +895,10 @@ mod tests {
             v => panic!("{v:?}"),
         }
         procs[4].idle_secs = 2 * MIN; // vite served a request recently
-        assert_eq!(verdict_of(&assess(&procs, &ctx), "Vite dev server"), &Verdict::Quiet);
+        assert_eq!(
+            verdict_of(&assess(&procs, &ctx), "Vite dev server"),
+            &Verdict::Quiet
+        );
     }
 
     #[test]
@@ -722,9 +908,15 @@ mod tests {
             pr.idle_secs = 3 * HOUR;
         }
         // Terminal is in front: idle sessions are suggested with a caution and never pre-selected.
-        let ctx = Context { self_pid: 999, frontmost_pid: Some(10), ..Default::default() };
+        let ctx = Context {
+            self_pid: 999,
+            frontmost_pid: Some(10),
+            ..Default::default()
+        };
         match verdict_of(&assess(&procs, &ctx), "Claude Code session") {
-            Verdict::Suggest { recommended, note, .. } => {
+            Verdict::Suggest {
+                recommended, note, ..
+            } => {
                 assert!(!recommended);
                 assert!(note.as_deref().unwrap().contains("Ghostty"));
             }
@@ -734,7 +926,9 @@ mod tests {
         procs[6].idle_secs = 30;
         assert_eq!(
             verdict_of(&assess(&procs, &ctx), "Claude Code session"),
-            &Verdict::Protected(Protection::InsideAppInUse { app: "Ghostty".into() })
+            &Verdict::Protected(Protection::InsideAppInUse {
+                app: "Ghostty".into()
+            })
         );
     }
 
@@ -744,20 +938,48 @@ mod tests {
             launchd(),
             app(40, 1, "Cursor", "Cursor"),
             app(41, 40, "Cursor", "Cursor Helper (Plugin)"),
-            p(42, 41, "rust-analyzer", &["/Users/me/.cursor/extensions/rust-analyzer"]),
+            p(
+                42,
+                41,
+                "rust-analyzer",
+                &["/Users/me/.cursor/extensions/rust-analyzer"],
+            ),
         ];
         let groups = build_groups(&procs, 999);
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].members, vec![40, 41, 42]);
-        let ctx = Context { self_pid: 999, frontmost_pid: Some(40), ..Default::default() };
-        assert_eq!(assess(&procs, &ctx)[0].verdict, Verdict::Protected(Protection::InUse));
+        let ctx = Context {
+            self_pid: 999,
+            frontmost_pid: Some(40),
+            ..Default::default()
+        };
+        assert_eq!(
+            assess(&procs, &ctx)[0].verdict,
+            Verdict::Protected(Protection::InUse)
+        );
     }
 
     #[test]
     fn orphaned_dev_server_and_mcp_server_are_recommended() {
-        let mut procs = vec![launchd(), p(50, 1, "node", &["node", "/p/node_modules/next/dist/bin/next", "dev"])];
-        procs.push(p(51, 1, "node", &["node", "/x/node_modules/@playwright/mcp/cli.js"]));
-        let ctx = Context { self_pid: 999, ..Default::default() };
+        let mut procs = vec![
+            launchd(),
+            p(
+                50,
+                1,
+                "node",
+                &["node", "/p/node_modules/next/dist/bin/next", "dev"],
+            ),
+        ];
+        procs.push(p(
+            51,
+            1,
+            "node",
+            &["node", "/x/node_modules/@playwright/mcp/cli.js"],
+        ));
+        let ctx = Context {
+            self_pid: 999,
+            ..Default::default()
+        };
         let out = assess(&procs, &ctx);
         for title in ["Next.js dev server", "MCP server: playwright"] {
             match verdict_of(&out, title) {
@@ -774,10 +996,25 @@ mod tests {
         let mut node = p(91, 90, "node", &["node", "server.js"]);
         node.ports = vec![56970];
         node.memory = 15 * MB;
-        let out = assess(&[launchd(), npm, node], &Context { self_pid: 999, ..Default::default() });
-        let a = out.iter().find(|a| a.group.root == 90).expect("npm is the root");
+        let out = assess(
+            &[launchd(), npm, node],
+            &Context {
+                self_pid: 999,
+                ..Default::default()
+            },
+        );
+        let a = out
+            .iter()
+            .find(|a| a.group.root == 90)
+            .expect("npm is the root");
         assert!(a.group.orphaned);
-        assert!(matches!(a.verdict, Verdict::Suggest { recommended: true, .. }));
+        assert!(matches!(
+            a.verdict,
+            Verdict::Suggest {
+                recommended: true,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -785,13 +1022,22 @@ mod tests {
         let mut sim = p(95, 1, "pew2", &["pew2"]);
         sim.exe = Some("/Users/me/Library/Developer/CoreSimulator/Devices/X/data/Containers/Bundle/Application/Y/pew2.app/pew2".into());
         sim.cpu = 106.0;
-        let out = assess(&[launchd(), sim], &Context { self_pid: 999, ..Default::default() });
+        let out = assess(
+            &[launchd(), sim],
+            &Context {
+                self_pid: 999,
+                ..Default::default()
+            },
+        );
         assert_eq!(out[0].verdict, Verdict::Protected(Protection::Simulator));
     }
 
     #[test]
     fn daemons_by_design_are_not_orphans() {
-        let procs = vec![launchd(), p(60, 1, "watchman", &["watchman", "--foreground"])];
+        let procs = vec![
+            launchd(),
+            p(60, 1, "watchman", &["watchman", "--foreground"]),
+        ];
         let g = build_groups(&procs, 999);
         assert!(!g[0].orphaned);
     }
@@ -804,9 +1050,18 @@ mod tests {
         let mut ws = p(71, 1, "WindowServer", &["WindowServer"]);
         ws.cpu = 90.0;
         ws.memory = 2 * GB;
-        let out = assess(&[launchd(), root_proc, ws], &Context { self_pid: 999, ..Default::default() });
+        let out = assess(
+            &[launchd(), root_proc, ws],
+            &Context {
+                self_pid: 999,
+                ..Default::default()
+            },
+        );
         assert!(out.iter().all(|a| a.group.root != 70));
-        assert!(out.iter().all(|a| a.group.root != 71 || a.verdict == Verdict::Protected(Protection::System)));
+        assert!(
+            out.iter()
+                .all(|a| a.group.root != 71 || a.verdict == Verdict::Protected(Protection::System))
+        );
     }
 
     #[test]
@@ -814,9 +1069,17 @@ mod tests {
         // Parent pid 80 now belongs to a *newer* process: the real parent is gone.
         let mut newer = p(80, 1, "zsh", &["-zsh"]);
         newer.start_time = 5000;
-        let child = p(81, 80, "node", &["node", "/p/node_modules/vite/bin/vite.js"]);
+        let child = p(
+            81,
+            80,
+            "node",
+            &["node", "/p/node_modules/vite/bin/vite.js"],
+        );
         let groups = build_groups(&[launchd(), newer, child], 999);
-        let vite = groups.iter().find(|g| g.title == "Vite dev server").unwrap();
+        let vite = groups
+            .iter()
+            .find(|g| g.title == "Vite dev server")
+            .unwrap();
         assert!(vite.orphaned);
     }
 
@@ -826,10 +1089,20 @@ mod tests {
         for pr in procs.iter_mut() {
             pr.idle_secs = 3 * HOUR;
         }
-        let mut ctx = Context { self_pid: 999, ..Default::default() };
-        let key = build_groups(&procs, 999).into_iter().find(|g| g.title == "Vite dev server").unwrap().key;
+        let mut ctx = Context {
+            self_pid: 999,
+            ..Default::default()
+        };
+        let key = build_groups(&procs, 999)
+            .into_iter()
+            .find(|g| g.title == "Vite dev server")
+            .unwrap()
+            .key;
         ctx.ignored.insert(key);
-        assert_eq!(verdict_of(&assess(&procs, &ctx), "Vite dev server"), &Verdict::Protected(Protection::Ignored));
+        assert_eq!(
+            verdict_of(&assess(&procs, &ctx), "Vite dev server"),
+            &Verdict::Protected(Protection::Ignored)
+        );
     }
 
     #[test]
@@ -837,8 +1110,15 @@ mod tests {
         let mut procs = workstation();
         procs[1].memory = 4 * GB;
         procs[1].cpu = 90.0;
-        let ctx = Context { self_pid: 999, watched_secs: 5 * HOUR, ..Default::default() };
-        assert_eq!(verdict_of(&assess(&procs, &ctx), "Ghostty"), &Verdict::Quiet);
+        let ctx = Context {
+            self_pid: 999,
+            watched_secs: 5 * HOUR,
+            ..Default::default()
+        };
+        assert_eq!(
+            verdict_of(&assess(&procs, &ctx), "Ghostty"),
+            &Verdict::Quiet
+        );
     }
 
     #[test]
@@ -848,9 +1128,23 @@ mod tests {
             d.memory = 2 * GB;
             d
         }];
-        let ctx = Context { self_pid: 999, running_containers: Some(0), ..Default::default() };
-        assert!(matches!(verdict_of(&assess(&procs, &ctx), "Docker"), Verdict::Suggest { recommended: true, .. }));
-        let ctx = Context { self_pid: 999, running_containers: Some(2), ..Default::default() };
+        let ctx = Context {
+            self_pid: 999,
+            running_containers: Some(0),
+            ..Default::default()
+        };
+        assert!(matches!(
+            verdict_of(&assess(&procs, &ctx), "Docker"),
+            Verdict::Suggest {
+                recommended: true,
+                ..
+            }
+        ));
+        let ctx = Context {
+            self_pid: 999,
+            running_containers: Some(2),
+            ..Default::default()
+        };
         assert_eq!(verdict_of(&assess(&procs, &ctx), "Docker"), &Verdict::Quiet);
     }
 
@@ -866,9 +1160,19 @@ mod tests {
     fn only_advisory_protections_can_be_closed_anyway() {
         assert!(Protection::InUse.user_closable());
         assert!(Protection::RecentlyUsed { mins_ago: 3 }.user_closable());
-        assert!(Protection::InsideAppInUse { app: "Ghostty".into() }.user_closable());
+        assert!(
+            Protection::InsideAppInUse {
+                app: "Ghostty".into()
+            }
+            .user_closable()
+        );
         assert!(Protection::Ignored.user_closable());
-        for locked in [Protection::ThisApp, Protection::LaunchedButters, Protection::System, Protection::Simulator] {
+        for locked in [
+            Protection::ThisApp,
+            Protection::LaunchedButters,
+            Protection::System,
+            Protection::Simulator,
+        ] {
             assert!(!locked.user_closable(), "{locked:?} must stay locked");
         }
     }
@@ -880,10 +1184,20 @@ mod tests {
         node.growth = Some((2 * GB, 40 * MIN));
         let mut fine = p(71, 1, "node", &["node", "other.js"]);
         fine.memory = 3 * GB;
-        let out = assess(&[launchd(), node, fine], &Context { self_pid: 999, ..Default::default() });
+        let out = assess(
+            &[launchd(), node, fine],
+            &Context {
+                self_pid: 999,
+                ..Default::default()
+            },
+        );
         let leak = out.iter().find(|a| a.group.root == 70).unwrap();
         match &leak.verdict {
-            Verdict::Suggest { reason, recommended, .. } => {
+            Verdict::Suggest {
+                reason,
+                recommended,
+                ..
+            } => {
                 assert_eq!(reason, "Grew 2.0 GB in 40 min");
                 assert!(!recommended);
             }
@@ -896,54 +1210,124 @@ mod tests {
     #[test]
     fn docker_vm_counts_as_docker() {
         let docker = app(60, 1, "Docker", "Docker Desktop");
-        let mut vm = p(61, 1, "com.apple.Virtualization.VirtualMachine", &["com.apple.Virtualization.VirtualMachine"]);
+        let mut vm = p(
+            61,
+            1,
+            "com.apple.Virtualization.VirtualMachine",
+            &["com.apple.Virtualization.VirtualMachine"],
+        );
         vm.exe = Some("/System/Library/Frameworks/Virtualization.framework/Versions/A/XPCServices/com.apple.Virtualization.VirtualMachine.xpc/Contents/MacOS/com.apple.Virtualization.VirtualMachine".into());
         vm.memory = 6 * GB;
         vm.responsible = Some(60);
-        let ctx = Context { self_pid: 999, running_containers: Some(0), ..Default::default() };
+        let ctx = Context {
+            self_pid: 999,
+            running_containers: Some(0),
+            ..Default::default()
+        };
         let out = assess(&[launchd(), docker, vm], &ctx);
-        let d = out.iter().find(|a| a.group.title == "Docker").expect("docker group");
+        let d = out
+            .iter()
+            .find(|a| a.group.title == "Docker")
+            .expect("docker group");
         assert!(d.group.members.contains(&61));
         assert!(d.group.memory >= 6 * GB);
-        assert!(matches!(d.verdict, Verdict::Suggest { recommended: true, .. }));
-        assert!(!out.iter().any(|a| a.group.root == 61), "VM is not its own (system) item");
+        assert!(matches!(
+            d.verdict,
+            Verdict::Suggest {
+                recommended: true,
+                ..
+            }
+        ));
+        assert!(
+            !out.iter().any(|a| a.group.root == 61),
+            "VM is not its own (system) item"
+        );
     }
 
     // ---- Windows: the same rules with Windows paths and .exe tools ----
 
     fn win(pid: u32, parent: u32, name: &str, exe: &str, cmd: &[&str]) -> ProcInfo {
-        ProcInfo { exe: Some(exe.into()), ..p(pid, parent, name, cmd) }
+        ProcInfo {
+            exe: Some(exe.into()),
+            ..p(pid, parent, name, cmd)
+        }
     }
 
     #[test]
     fn windows_cli_tools_are_not_desktop_apps() {
         // Parent 4242 is gone (terminal closed): orphans.
         let claude = {
-            let mut c = win(80, 4242, "claude.exe", r"C:\Users\me\.local\bin\claude.exe", &["claude"]);
+            let mut c = win(
+                80,
+                4242,
+                "claude.exe",
+                r"C:\Users\me\.local\bin\claude.exe",
+                &["claude"],
+            );
             c.memory = 300 * MB;
             c
         };
         let emu = {
-            let mut e = win(81, 4242, "qemu-system-x86_64.exe", r"C:\Users\me\AppData\Local\Android\Sdk\emulator\qemu\windows-x86_64\qemu-system-x86_64.exe", &["qemu-system-x86_64.exe", "-avd", "Pixel_8"]);
+            let mut e = win(
+                81,
+                4242,
+                "qemu-system-x86_64.exe",
+                r"C:\Users\me\AppData\Local\Android\Sdk\emulator\qemu\windows-x86_64\qemu-system-x86_64.exe",
+                &["qemu-system-x86_64.exe", "-avd", "Pixel_8"],
+            );
             e.memory = 2 * GB;
             e.idle_secs = 3 * HOUR;
             e
         };
         let go = {
-            let mut g = win(82, 4242, "api.exe", r"C:\Users\me\AppData\Local\Temp\go-build3412345\b001\exe\api.exe", &["api.exe"]);
+            let mut g = win(
+                82,
+                4242,
+                "api.exe",
+                r"C:\Users\me\AppData\Local\Temp\go-build3412345\b001\exe\api.exe",
+                &["api.exe"],
+            );
             g.ports = vec![8080];
             g.memory = 40 * MB;
             g
         };
-        let slack = win(83, 4242, "slack.exe", r"C:\Users\me\AppData\Local\slack\app-4.41.0\slack.exe", &["slack.exe"]);
-        let out = assess(&[claude, emu, go, slack], &Context { self_pid: 999, watched_secs: 4 * HOUR, ..Default::default() });
+        let slack = win(
+            83,
+            4242,
+            "slack.exe",
+            r"C:\Users\me\AppData\Local\slack\app-4.41.0\slack.exe",
+            &["slack.exe"],
+        );
+        let out = assess(
+            &[claude, emu, go, slack],
+            &Context {
+                self_pid: 999,
+                watched_secs: 4 * HOUR,
+                ..Default::default()
+            },
+        );
         let find = |root: u32| out.iter().find(|a| a.group.root == root).unwrap();
         assert_eq!(find(80).group.kind, Kind::AgentSession);
-        assert!(matches!(find(80).verdict, Verdict::Suggest { recommended: true, .. }), "orphaned claude.exe");
+        assert!(
+            matches!(
+                find(80).verdict,
+                Verdict::Suggest {
+                    recommended: true,
+                    ..
+                }
+            ),
+            "orphaned claude.exe"
+        );
         assert_eq!(find(81).group.title, "Android emulator");
         assert!(matches!(find(81).verdict, Verdict::Suggest { .. }));
         assert_eq!(find(82).group.kind, Kind::DevServer);
-        assert!(matches!(find(82).verdict, Verdict::Suggest { recommended: true, .. }));
+        assert!(matches!(
+            find(82).verdict,
+            Verdict::Suggest {
+                recommended: true,
+                ..
+            }
+        ));
         // A real Windows app is still an app.
         assert_eq!(find(83).group.kind, Kind::App);
     }
@@ -951,24 +1335,83 @@ mod tests {
     #[test]
     fn windows_python_and_npm_chains() {
         // py.exe -m uvicorn -> python.exe child, terminal closed.
-        let launcher = win(90, 4242, "py.exe", r"C:\Windows\py.exe", &["py", "-m", "uvicorn", "main:app"]);
-        let mut child = win(91, 90, "python.exe", r"C:\Users\me\AppData\Local\Programs\Python\Python313\python.exe", &["python.exe", "-m", "uvicorn", "main:app"]);
+        let launcher = win(
+            90,
+            4242,
+            "py.exe",
+            r"C:\Windows\py.exe",
+            &["py", "-m", "uvicorn", "main:app"],
+        );
+        let mut child = win(
+            91,
+            90,
+            "python.exe",
+            r"C:\Users\me\AppData\Local\Programs\Python\Python313\python.exe",
+            &["python.exe", "-m", "uvicorn", "main:app"],
+        );
         child.ports = vec![8000];
         child.memory = 70 * MB;
         // npm run dev on Windows: node npm-cli.js -> cmd /d /s /c vite -> node vite.js
-        let npm = win(92, 4242, "node.exe", r"C:\Program Files\nodejs\node.exe", &["node", r"C:\Program Files\nodejs\node_modules\npm\bin\npm-cli.js", "run", "dev"]);
-        let glue = win(93, 92, "cmd.exe", r"C:\Windows\System32\cmd.exe", &["cmd.exe", "/d", "/s", "/c", "vite"]);
-        let mut vite = win(94, 93, "node.exe", r"C:\Program Files\nodejs\node.exe", &["node", r"C:\work\shop\node_modules\vite\bin\vite.js"]);
+        let npm = win(
+            92,
+            4242,
+            "node.exe",
+            r"C:\Program Files\nodejs\node.exe",
+            &[
+                "node",
+                r"C:\Program Files\nodejs\node_modules\npm\bin\npm-cli.js",
+                "run",
+                "dev",
+            ],
+        );
+        let glue = win(
+            93,
+            92,
+            "cmd.exe",
+            r"C:\Windows\System32\cmd.exe",
+            &["cmd.exe", "/d", "/s", "/c", "vite"],
+        );
+        let mut vite = win(
+            94,
+            93,
+            "node.exe",
+            r"C:\Program Files\nodejs\node.exe",
+            &["node", r"C:\work\shop\node_modules\vite\bin\vite.js"],
+        );
         vite.ports = vec![5173];
         vite.memory = 90 * MB;
-        let out = assess(&[launcher, child, npm, glue, vite], &Context { self_pid: 999, ..Default::default() });
-        let uv = out.iter().find(|a| a.group.title == "Uvicorn dev server").expect("uvicorn");
+        let out = assess(
+            &[launcher, child, npm, glue, vite],
+            &Context {
+                self_pid: 999,
+                ..Default::default()
+            },
+        );
+        let uv = out
+            .iter()
+            .find(|a| a.group.title == "Uvicorn dev server")
+            .expect("uvicorn");
         assert!(uv.group.members.contains(&91));
-        assert!(matches!(uv.verdict, Verdict::Suggest { recommended: true, .. }));
-        let v = out.iter().find(|a| a.group.title == "Vite dev server").expect("vite");
+        assert!(matches!(
+            uv.verdict,
+            Verdict::Suggest {
+                recommended: true,
+                ..
+            }
+        ));
+        let v = out
+            .iter()
+            .find(|a| a.group.title == "Vite dev server")
+            .expect("vite");
         assert_eq!(v.group.root, 92, "closing npm closes the whole chain");
         assert!(v.group.members.contains(&94));
-        assert!(matches!(v.verdict, Verdict::Suggest { recommended: true, .. }));
+        assert!(matches!(
+            v.verdict,
+            Verdict::Suggest {
+                recommended: true,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -979,23 +1422,48 @@ mod tests {
         w.parent = Some(9999); // in a terminal, not an orphan
         w.memory = 300 * MB;
         w.growth = Some((1_100 * MB, 25 * MIN));
-        let out = assess(&[launchd(), w], &Context { self_pid: 999, ..Default::default() });
-        let a = out.iter().find(|a| a.group.root == 95).expect("leaking process is a candidate");
-        assert!(matches!(&a.verdict, Verdict::Suggest { reason, recommended: false, .. } if reason.starts_with("Grew 1.1 GB")));
+        let out = assess(
+            &[launchd(), w],
+            &Context {
+                self_pid: 999,
+                ..Default::default()
+            },
+        );
+        let a = out
+            .iter()
+            .find(|a| a.group.root == 95)
+            .expect("leaking process is a candidate");
+        assert!(
+            matches!(&a.verdict, Verdict::Suggest { reason, recommended: false, .. } if reason.starts_with("Grew 1.1 GB"))
+        );
     }
 
     #[test]
     fn child_with_a_lower_pid_still_joins_its_parent_group() {
         // Windows: next-server (child) got a lower pid than `next dev` (parent),
         // and both started in the same second.
-        let mut parent = p(500, 4242, "node.exe", &["node", "/x/node_modules/next/dist/bin/next", "dev"]);
+        let mut parent = p(
+            500,
+            4242,
+            "node.exe",
+            &["node", "/x/node_modules/next/dist/bin/next", "dev"],
+        );
         parent.start_time = 100;
         let mut child = p(120, 500, "node.exe", &["next-server (v15.5.0)", "-e", "x"]);
         child.start_time = 100;
         child.ports = vec![3000];
         child.memory = 300 * MB;
-        let out = assess(&[parent, child], &Context { self_pid: 999, ..Default::default() });
-        let nexts: Vec<_> = out.iter().filter(|a| a.group.title == "Next.js dev server").collect();
+        let out = assess(
+            &[parent, child],
+            &Context {
+                self_pid: 999,
+                ..Default::default()
+            },
+        );
+        let nexts: Vec<_> = out
+            .iter()
+            .filter(|a| a.group.title == "Next.js dev server")
+            .collect();
         assert_eq!(nexts.len(), 1, "one row, not two");
         assert_eq!(nexts[0].group.root, 500);
         assert!(nexts[0].group.members.contains(&120));

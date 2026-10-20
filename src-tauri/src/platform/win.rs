@@ -2,8 +2,8 @@ use std::collections::{HashMap, HashSet};
 
 use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GW_OWNER, GetForegroundWindow, GetWindow, GetWindowThreadProcessId, IsWindowVisible, PostMessageW,
-    WM_CLOSE,
+    EnumWindows, GW_OWNER, GetForegroundWindow, GetWindow, GetWindowThreadProcessId,
+    IsWindowVisible, PostMessageW, WM_CLOSE,
 };
 use windows::core::BOOL;
 
@@ -48,7 +48,9 @@ unsafe extern "system" fn collect_windows(hwnd: HWND, lparam: LPARAM) -> BOOL {
     // SAFETY: hwnd comes from EnumWindows; the out-pointer is a local.
     unsafe {
         GetWindowThreadProcessId(hwnd, Some(&mut pid));
-        let top_level = GetWindow(hwnd, GW_OWNER).map(|o| o.is_invalid()).unwrap_or(true);
+        let top_level = GetWindow(hwnd, GW_OWNER)
+            .map(|o| o.is_invalid())
+            .unwrap_or(true);
         if state.pids.contains(&pid) && IsWindowVisible(hwnd).as_bool() && top_level {
             state.found.push(hwnd);
         }
@@ -57,7 +59,10 @@ unsafe extern "system" fn collect_windows(hwnd: HWND, lparam: LPARAM) -> BOOL {
 }
 
 fn visible_windows(pids: &[u32]) -> Vec<HWND> {
-    let mut state = Collect { pids: pids.iter().copied().collect(), found: Vec::new() };
+    let mut state = Collect {
+        pids: pids.iter().copied().collect(),
+        found: Vec::new(),
+    };
     // SAFETY: the callback only touches `state`, which outlives the call.
     unsafe {
         let _ = EnumWindows(Some(collect_windows), LPARAM(&raw mut state as isize));
@@ -67,7 +72,9 @@ fn visible_windows(pids: &[u32]) -> Vec<HWND> {
 
 pub fn footprint(pid: u32) -> Option<u64> {
     use windows::Win32::Foundation::CloseHandle;
-    use windows::Win32::System::ProcessStatus::{GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS, PROCESS_MEMORY_COUNTERS_EX};
+    use windows::Win32::System::ProcessStatus::{
+        GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS, PROCESS_MEMORY_COUNTERS_EX,
+    };
     use windows::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
     // Private bytes: memory the process owns whether or not Windows has
     // trimmed it out of the working set (idle processes get trimmed, so the

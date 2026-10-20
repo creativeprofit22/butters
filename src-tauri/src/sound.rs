@@ -67,7 +67,9 @@ mod imp {
 
     pub fn play(app: &AppHandle, id: &'static str, bytes: &'static [u8]) {
         let _ = app.run_on_main_thread(move || {
-            let Some(_mtm) = MainThreadMarker::new() else { return };
+            let Some(_mtm) = MainThreadMarker::new() else {
+                return;
+            };
             let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
             let sounds = cache.get_or_insert_with(|| Sounds(HashMap::new()));
             let sound = sounds.0.entry(id).or_insert_with(|| {
@@ -91,7 +93,11 @@ mod imp {
         // SAFETY: SND_MEMORY reads the WAV from `bytes`, which is 'static, so
         // it outlives the asynchronous playback.
         unsafe {
-            let _ = PlaySoundW(PCWSTR(bytes.as_ptr().cast()), None, SND_MEMORY | SND_ASYNC | SND_NODEFAULT);
+            let _ = PlaySoundW(
+                PCWSTR(bytes.as_ptr().cast()),
+                None,
+                SND_MEMORY | SND_ASYNC | SND_NODEFAULT,
+            );
         }
     }
 }
@@ -111,7 +117,10 @@ mod tests {
         assert!(clip("melt").is_some());
         assert!(clip("../../etc/passwd").is_none());
         assert!(clip("").is_none());
-        for (_, bytes) in ["open", "tick", "melt", "freed", "close"].iter().filter_map(|n| clip(n)) {
+        for (_, bytes) in ["open", "tick", "melt", "freed", "close"]
+            .iter()
+            .filter_map(|n| clip(n))
+        {
             assert_eq!(&bytes[..4], b"RIFF");
             assert_eq!(&bytes[8..12], b"WAVE");
         }

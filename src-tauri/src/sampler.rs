@@ -9,8 +9,8 @@ use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, Uid, UpdateKin
 
 use crate::engine::classify::{app_name, app_root};
 use crate::engine::model::ProcInfo;
-use crate::trends::Reading;
 use crate::platform::{self, Pressure, Thermal};
+use crate::trends::Reading;
 
 /// A process counts as active when it used at least this much of one core
 /// on average since the previous sample.
@@ -74,7 +74,10 @@ impl Sampler {
                 .without_tasks(),
         );
         if self.my_uid.is_none() {
-            self.my_uid = self.sys.process(Pid::from_u32(self.self_pid)).and_then(|p| p.user_id().cloned());
+            self.my_uid = self
+                .sys
+                .process(Pid::from_u32(self.self_pid))
+                .and_then(|p| p.user_id().cloned());
         }
     }
 
@@ -96,13 +99,20 @@ impl Sampler {
                 .map(|root| app_name(&root))
                 .unwrap_or_else(|| p.name().to_string_lossy().into_owned());
             let memory = platform::footprint(key.0).unwrap_or_else(|| p.memory());
-            out.push(Reading { pid: key.0, start: key.1, label, memory, cpu });
+            out.push(Reading {
+                pid: key.0,
+                start: key.1,
+                label,
+                memory,
+                cpu,
+            });
         }
         out
     }
 
     fn refresh(&mut self, kind: ProcessRefreshKind) {
-        self.sys.refresh_processes_specifics(ProcessesToUpdate::All, true, kind);
+        self.sys
+            .refresh_processes_specifics(ProcessesToUpdate::All, true, kind);
         self.sys.refresh_memory();
         self.sys.refresh_cpu_usage();
         let now = Instant::now();
@@ -126,7 +136,13 @@ impl Sampler {
                 None => {
                     self.activity.insert(
                         key,
-                        Activity { cpu_ms, at: now, cpu_pct: 0.0, last_active: None, first_seen: now },
+                        Activity {
+                            cpu_ms,
+                            at: now,
+                            cpu_pct: 0.0,
+                            last_active: None,
+                            first_seen: now,
+                        },
                     );
                 }
             }
@@ -146,7 +162,11 @@ impl Sampler {
             .with_cwd(UpdateKind::OnlyIfNotSet)
             .with_user(UpdateKind::OnlyIfNotSet)
             .without_tasks();
-        if first || self.last_refresh.is_some_and(|t| t.elapsed() < Duration::from_millis(300)) {
+        if first
+            || self
+                .last_refresh
+                .is_some_and(|t| t.elapsed() < Duration::from_millis(300))
+        {
             // CPU use needs two readings; take a short second one on first use.
             self.refresh(kind);
             std::thread::sleep(Duration::from_millis(500));
@@ -154,7 +174,10 @@ impl Sampler {
         self.refresh(kind);
 
         if self.my_uid.is_none() {
-            self.my_uid = self.sys.process(Pid::from_u32(self.self_pid)).and_then(|p| p.user_id().cloned());
+            self.my_uid = self
+                .sys
+                .process(Pid::from_u32(self.self_pid))
+                .and_then(|p| p.user_id().cloned());
         }
         let pids: Vec<u32> = self.sys.processes().keys().map(|p| p.as_u32()).collect();
         let tty_idle = platform::terminal_idle(&pids);
@@ -167,7 +190,11 @@ impl Sampler {
             let (cpu, idle, lower_bound) = match self.activity.get(&key) {
                 Some(a) => {
                     let since = a.last_active.unwrap_or(a.first_seen);
-                    (a.cpu_pct, now.duration_since(since).as_secs(), a.last_active.is_none())
+                    (
+                        a.cpu_pct,
+                        now.duration_since(since).as_secs(),
+                        a.last_active.is_none(),
+                    )
                 }
                 None => (0.0, 0, true),
             };
@@ -188,7 +215,12 @@ impl Sampler {
                 start_time: p.start_time(),
                 name: p.name().to_string_lossy().into_owned(),
                 exe: p.exe().map(|e| e.to_string_lossy().into_owned()),
-                cmd: p.cmd().iter().take(8).map(|a| a.to_string_lossy().into_owned()).collect(),
+                cmd: p
+                    .cmd()
+                    .iter()
+                    .take(8)
+                    .map(|a| a.to_string_lossy().into_owned())
+                    .collect(),
                 cwd: p.cwd().map(|c| c.to_string_lossy().into_owned()),
                 memory: platform::footprint(pid).unwrap_or_else(|| p.memory()),
                 cpu,
@@ -203,7 +235,9 @@ impl Sampler {
         // Virtual machines run as system services; count them under the app
         // that started them (Docker Desktop's VM holds most of its memory).
         for p in out.iter_mut() {
-            if p.name.starts_with("com.apple.Virtualization.VirtualMachine") {
+            if p.name
+                .starts_with("com.apple.Virtualization.VirtualMachine")
+            {
                 p.responsible = platform::responsible_pid(p.pid);
             }
         }
