@@ -15,6 +15,26 @@
         "Not checked: did not run builds, release.sh, Playwright or the macOS real-app test"
       ]
     },
+    "ci": {
+      "checkedAt": "2026-10-20T18:25:29.248Z",
+      "commit": "4f25691",
+      "uncommittedChanges": true,
+      "result": "pass",
+      "summary": "All 4 findings from today's CI review are fixed: release now waits for full CI, main requires the 8 CI checks, Dependabot added, cargo-audit pinned. Workflow edits are local, not yet run on GitHub.",
+      "findings": [],
+      "accepted": [
+        "Admin bypass on protect-main kept: scripts/release.sh pushes the release commit straight to main"
+      ],
+      "evidence": [
+        "release.yml: new `ci` job calls ./.github/workflows/ci.yml (contents: read); build needs ci; workflow permissions {} with contents: write only on build/publish",
+        "ci.yml: added workflow_call; push limited to branches so tags only run via release; cargo-audit pinned to 0.22.2 (latest per crates.io)",
+        "Added .github/dependabot.yml: github-actions, npm, cargo weekly, grouped",
+        "gh api PUT rulesets/25484389 -> required_status_checks: test x2, lab x2, e2e, scripts, audit, secrets (GitHub Actions app); enforcement active",
+        "python yaml.safe_load on all 3 files: parse ok; job needs/permissions verified",
+        "Scope: re-check of the 4 findings recorded earlier today only",
+        "Not checked: edited workflows not yet run on GitHub (uncommitted); actionlint/zizmor not installed; scripts and secrets jobs exist only in unpushed commits so those checks will not report until pushed"
+      ]
+    },
     "docs": {
       "checkedAt": "2026-10-20T14:20:19.759Z",
       "commit": "5992028",

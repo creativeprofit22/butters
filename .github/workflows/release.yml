@@ -8,15 +8,23 @@ on:
   push:
     tags: ["v*"]
 
-permissions:
-  contents: write
+permissions: {}
 
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
+  # The full CI suite must pass on the tagged commit before anything is built.
+  ci:
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
   build:
+    needs: ci
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       max-parallel: 1 # one at a time, so each job merges cleanly into latest.json
@@ -88,6 +96,8 @@ jobs:
 
   publish:
     needs: build
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
     steps:
       - name: Publish the draft release

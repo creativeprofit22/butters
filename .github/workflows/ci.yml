@@ -4,7 +4,9 @@ name: ci
 
 on:
   push:
+    branches: ["**"] # tags are tested by release.yml, which calls this workflow
   pull_request:
+  workflow_call:
 
 permissions:
   contents: read
@@ -115,7 +117,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - run: cargo install cargo-audit --locked
+      - run: cargo install cargo-audit --version 0.22.2 --locked
       # Linux-only GTK crates are flagged unmaintained upstream; they are never
       # built into the macOS or Windows app. Real vulnerabilities still fail.
       - run: cargo audit
