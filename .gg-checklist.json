@@ -35,6 +35,22 @@
         "Not checked: edited workflows not yet run on GitHub (uncommitted); actionlint/zizmor not installed; scripts and secrets jobs exist only in unpushed commits so those checks will not report until pushed"
       ]
     },
+    "commit-gate": {
+      "checkedAt": "2026-10-20T18:31:12.279Z",
+      "commit": "22d7641",
+      "uncommittedChanges": true,
+      "result": "pass",
+      "summary": "Added project /commit command that runs the CI-matching checks and a diff review before committing (commit gate only).",
+      "findings": [],
+      "evidence": [
+        "Re-check finding 1: .gg/commands/commit.md exists, frontmatter name: commit; git check-ignore says not ignored",
+        "Re-check finding 2: command runs pnpm check/lint, cargo fmt/clippy (both feature sets)/test, plus ruff/shellcheck/e2e on relevant changes, matching ci.yml",
+        "Verified referenced package.json scripts exist: check, lint, format, test:e2e",
+        "Review step: one subagent briefed on CLAUDE.md invariants (four-place command rule, pid safety, panel timing)",
+        "Scope: commit-gate only, re-checking the 2 findings recorded earlier",
+        "Not checked: command not run end to end; no git pre-commit hook, so plain git commit stays ungated"
+      ]
+    },
     "docs": {
       "checkedAt": "2026-10-20T14:20:19.759Z",
       "commit": "5992028",
