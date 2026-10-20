@@ -8,7 +8,11 @@
 // ellipsis, so lines that already fit don't sprout redundant tooltips.
 import type { Action } from "svelte/action";
 
-export type TipValue = string | null | undefined | { text: string | null | undefined; onlyIfClipped?: boolean; lines?: string[] };
+export type TipValue =
+  | string
+  | null
+  | undefined
+  | { text: string | null | undefined; onlyIfClipped?: boolean; lines?: string[] };
 
 const DELAY = 450;
 const GAP = 6;

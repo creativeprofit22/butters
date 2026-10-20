@@ -2,18 +2,29 @@
   import { onMount } from "svelte";
   import { flip } from "svelte/animate";
   import { Tween } from "svelte/motion";
-  import { api, type Notify, type Outcome, type Protected, type Smoothness, type ScanResult, type ServicesResult, type Settings, type Suggestion, type UpdateStatus } from "./lib/api";
-  import { bytes } from "./lib/format";
-  import Check from "./lib/Check.svelte";
-  import Icon from "./lib/Icon.svelte";
-  import Row from "./lib/Row.svelte";
-  import { butterEase, dissolve, melt, ms, pour } from "./lib/motion";
-  import Savings from "./lib/Savings.svelte";
-  import StatusPat from "./lib/StatusPat.svelte";
+  import {
+    api,
+    type Notify,
+    type Outcome,
+    type Protected,
+    type ScanResult,
+    type ServicesResult,
+    type Settings,
+    type Smoothness,
+    type Suggestion,
+    type UpdateStatus,
+  } from "./lib/api";
   import ButterGauges from "./lib/ButterGauges.svelte";
-  import Toast from "./lib/Toast.svelte";
-  import StatsView from "./lib/StatsView.svelte";
+  import Check from "./lib/Check.svelte";
   import { dropFrom } from "./lib/drops";
+  import { bytes } from "./lib/format";
+  import Icon from "./lib/Icon.svelte";
+  import { butterEase, dissolve, melt, ms, pour } from "./lib/motion";
+  import Row from "./lib/Row.svelte";
+  import Savings from "./lib/Savings.svelte";
+  import StatsView from "./lib/StatsView.svelte";
+  import StatusPat from "./lib/StatusPat.svelte";
+  import Toast from "./lib/Toast.svelte";
   import { tip } from "./lib/tip";
 
   let scan = $state<ScanResult | null>(null);
@@ -79,9 +90,7 @@
       ...Object.values(meltingRows),
     ]
       .filter((s) => !gone[s.key])
-      .sort(
-      (a, b) => Number(b.recommended) - Number(a.recommended) || b.memory - a.memory,
-    ),
+      .sort((a, b) => Number(b.recommended) - Number(a.recommended) || b.memory - a.memory),
   );
   const isSelected = (s: Suggestion) => overrides[s.key] ?? s.recommended;
   const selected = $derived(items.filter((s) => !meltingRows[s.key] && isSelected(s)));
@@ -423,7 +432,12 @@
   onMount(() => {
     // Docker/Ollama results from the background check show at once, together
     // with everything else; a fresh check then updates them quietly.
-    api.cachedServices().then((r) => r && !services && (services = r)).catch(() => {});
+    api
+      .cachedServices()
+      .then((r) => {
+        if (r && !services) services = r;
+      })
+      .catch(() => {});
     api
       .isPlayground()
       .then(async (yes) => {
@@ -431,13 +445,19 @@
       })
       .catch(() => {});
     api.sound("open");
-    api.notifyPermission().then((n) => (notify = n)).catch(() => {});
+    api
+      .notifyPermission()
+      .then((n) => (notify = n))
+      .catch(() => {});
     const live = setInterval(tickLive, 2000);
     // Start with focus on the panel itself, not on the first checkbox,
     // so no control shows a focus ring until the keyboard is used.
     panelEl.focus({ preventScroll: true });
     refresh();
-    api.updateStatus().then((u) => (update = u)).catch(() => {});
+    api
+      .updateStatus()
+      .then((u) => (update = u))
+      .catch(() => {});
     void loadSmoothness();
     const timer = setInterval(() => {
       if (!running && !confirming && !savings && view === "main" && document.visibilityState === "visible") refresh();
@@ -452,7 +472,11 @@
   const memPct = $derived(scan ? (memTween.current / Math.max(1, scan.stats.memTotal)) * 100 : 0);
   const cpuPct = $derived(cpuTween.current);
   const memState = $derived(
-    scan?.stats.pressure === "critical" || memPct >= 92 ? "bad" : scan?.stats.pressure === "warn" || memPct >= 85 ? "warn" : "ok",
+    scan?.stats.pressure === "critical" || memPct >= 92
+      ? "bad"
+      : scan?.stats.pressure === "warn" || memPct >= 85
+        ? "warn"
+        : "ok",
   );
   const cpuState = $derived(cpuPct >= 85 ? "bad" : cpuPct >= 60 ? "warn" : "ok");
   const heat = $derived(

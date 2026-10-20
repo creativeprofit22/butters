@@ -1,6 +1,6 @@
 // The butter features: gauges, physics melt, knife, score, toast, texture.
-import { expect, test, type Page } from "@playwright/test";
-import { installFakeBackend, type FakeState } from "./backend";
+import { expect, type Page, test } from "@playwright/test";
+import { type FakeState, installFakeBackend } from "./backend";
 
 const GB = 1024 ** 3;
 
@@ -44,10 +44,14 @@ test("CPU is sizzling butter: the fill is the value, bubbles only inside it", as
   const pct = 42;
   // Fill length matches the number.
   await expect
-    .poll(() => meter.locator(".fill").evaluate((el) => parseFloat(getComputedStyle(el).getPropertyValue("--cpu"))), { timeout: 4000 })
+    .poll(() => meter.locator(".fill").evaluate((el) => parseFloat(getComputedStyle(el).getPropertyValue("--cpu"))), {
+      timeout: 4000,
+    })
     .toBeCloseTo(0.42, 2);
   // Every sizzling bubble sits inside the filled part.
-  const bubbles = await meter.locator(".bubble.on").evaluateAll((els) => els.map((e) => parseFloat((e as HTMLElement).style.left)));
+  const bubbles = await meter
+    .locator(".bubble.on")
+    .evaluateAll((els) => els.map((e) => parseFloat((e as HTMLElement).style.left)));
   expect(bubbles.length).toBeGreaterThan(0);
   for (const at of bubbles) expect(at).toBeLessThan(pct);
 });
@@ -94,7 +98,9 @@ test("knife: a short swipe springs back; Escape disarms", async ({ page }) => {
   await open(page);
   const row = await swipe(page, "Google Chrome", 0.12);
   await expect(page.getByRole("button", { name: "Slice?" })).toHaveCount(0);
-  await expect.poll(() => row.evaluate((el) => getComputedStyle(el).transform)).toMatch(/none|matrix\(1, 0, 0, 1, 0, 0\)/);
+  await expect
+    .poll(() => row.evaluate((el) => getComputedStyle(el).transform))
+    .toMatch(/none|matrix\(1, 0, 0, 1, 0, 0\)/);
   await swipe(page, "Google Chrome", 0.6);
   await expect(page.getByRole("button", { name: "Slice?" })).toBeVisible();
   await page.keyboard.press("Escape");
@@ -120,9 +126,13 @@ test("toast mode: nothing to close and smooth -> toast gets buttered", async ({ 
   // Left-aligned with the section heading, like every other row.
   // Compare the toaster to where the heading's text starts (inside its padding).
   const toastLeft = (await page.locator(".toast-mode svg").boundingBox())!.x;
-  const textLeft = await page.locator("h2.section").evaluate((el) => el.getBoundingClientRect().left + parseFloat(getComputedStyle(el).paddingLeft));
+  const textLeft = await page
+    .locator("h2.section")
+    .evaluate((el) => el.getBoundingClientRect().left + parseFloat(getComputedStyle(el).paddingLeft));
   expect(Math.abs(toastLeft - textLeft)).toBeLessThan(3);
-  await expect.poll(async () => (await fake(page)).sounds.filter((s) => s === "open").length, { timeout: 3000 }).toBe(2);
+  await expect
+    .poll(async () => (await fake(page)).sounds.filter((s) => s === "open").length, { timeout: 3000 })
+    .toBe(2);
 });
 
 test("toast mode stays away when there's work or strain", async ({ page }) => {
@@ -141,6 +151,8 @@ test("texture: grain and sheen, warmer under strain", async ({ page }) => {
 
 test("texture: cool when smooth", async ({ page }) => {
   await open(page);
-  await expect.poll(() => page.locator(".panel").evaluate((el) => getComputedStyle(el).getPropertyValue("--warmth").trim())).toBe("0");
+  await expect
+    .poll(() => page.locator(".panel").evaluate((el) => getComputedStyle(el).getPropertyValue("--warmth").trim()))
+    .toBe("0");
   void GB;
 });

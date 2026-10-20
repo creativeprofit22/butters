@@ -11,7 +11,7 @@ let live = 0;
 export function clearDrops(layer: HTMLElement | undefined) {
   if (!layer) return;
   for (const el of [...layer.querySelectorAll(".drop")]) {
-    el.getAnimations().forEach((a) => a.cancel());
+    for (const a of el.getAnimations()) a.cancel();
     el.remove();
   }
   live = 0;

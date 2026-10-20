@@ -115,7 +115,6 @@ export interface Culprit {
   series: number[];
 }
 
-
 export interface Smoothness {
   score: number | null;
   freedToday: number;

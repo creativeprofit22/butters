@@ -8,7 +8,11 @@
   import { butterEase, dissolve, ms } from "./motion";
   import { tip } from "./tip";
 
-  let { smooth, onBack, tab: initialTab = "life" }: { smooth: Smoothness | null; onBack: () => void; tab?: "life" | "fan" } = $props();
+  let {
+    smooth,
+    onBack,
+    tab: initialTab = "life",
+  }: { smooth: Smoothness | null; onBack: () => void; tab?: "life" | "fan" } = $props();
 
   // svelte-ignore state_referenced_locally
   let tab = $state<"life" | "fan">(initialTab);

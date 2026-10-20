@@ -29,7 +29,12 @@ for (const level of ["smooth", "busy", "strained"] as const) {
     // animations themselves rather than a fixed pause.
     await page.waitForFunction(() =>
       [...document.querySelectorAll(".status-pat, .status-pat *")].every((el) =>
-        el.getAnimations().every((a) => a.playState !== "running" || (a.effect as KeyframeEffect)?.getComputedTiming().iterations === Infinity),
+        el
+          .getAnimations()
+          .every(
+            (a) =>
+              a.playState !== "running" || (a.effect as KeyframeEffect)?.getComputedTiming().iterations === Infinity,
+          ),
       ),
     );
     expect(await pat.locator(".body > path").count()).toBe(3); // side, front, top
