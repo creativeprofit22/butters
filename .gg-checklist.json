@@ -60,6 +60,22 @@
         "Scope: re-check of the 5 findings recorded earlier today only",
         "Not checked: clippy (with or without playground), Playwright e2e, no new full vocabulary review"
       ]
+    },
+    "secrets": {
+      "checkedAt": "2026-10-20T15:41:50.345Z",
+      "commit": "510dce2",
+      "uncommittedChanges": true,
+      "result": "pass",
+      "summary": "Both findings from today's review are fixed: .gitignore now covers *.pem/*.pfx/*.p8, and CI has a gitleaks job over full history. This re-checked only those 2 findings.",
+      "findings": [],
+      "evidence": [
+        ".gitignore: added *.pem, *.pfx, *.p8; git check-ignore confirms x.pem, x.pfx, x.p8, .env.local ignored; git ls-files -ci: no tracked file newly ignored",
+        "ci.yml: new 'secrets' job, checkout fetch-depth 0 + gitleaks-action pinned e0c47f4 (v3.0.0, verified via gh api), comments off",
+        "ci.yml parses as YAML (python yaml.safe_load): jobs test, lab, e2e, audit, secrets",
+        "Owner is a personal account (gh api), so no GITLEAKS_LICENSE needed",
+        "Scope: re-check of the 2 findings recorded earlier today only",
+        "Not checked: the gitleaks job has not run on GitHub yet (changes uncommitted); no new full secrets review"
+      ]
     }
   }
 }

@@ -7,6 +7,9 @@ src-tauri/gen/schemas
 *.log
 *.p12
 *.key
+*.pem
+*.pfx
+*.p8
 .env*
 test-results
 playwright-report

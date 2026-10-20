@@ -105,3 +105,17 @@ jobs:
       # built into the macOS or Windows app. Real vulnerabilities still fail.
       - run: cargo audit
         working-directory: src-tauri
+
+  # Fails if an API key, token or private key is committed anywhere in history.
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The token is read-only, so PR comments can't be posted; the job summary still shows hits.
+          GITLEAKS_ENABLE_COMMENTS: false
