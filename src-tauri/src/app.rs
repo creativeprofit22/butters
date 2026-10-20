@@ -80,6 +80,17 @@ impl Target {
             Target::Procs { key, .. } | Target::Container { key, .. } | Target::Model { key, .. } | Target::DockerDisk { key, .. } => key,
         }
     }
+
+    /// Kind to count freed memory under in history. Docker clean-ups free disk,
+    /// not memory, so they have none and are recorded separately.
+    fn memory_kind(&self) -> Option<Kind> {
+        match self {
+            Target::Procs { kind, .. } => Some(*kind),
+            Target::Container { .. } => Some(Kind::DockerContainer),
+            Target::Model { .. } => Some(Kind::OllamaModel),
+            Target::DockerDisk { .. } => None,
+        }
+    }
 }
 
 pub struct AppState {
@@ -713,17 +724,11 @@ pub async fn close_item(app: AppHandle, id: String, force: bool) -> Result<Outco
         };
         if let Outcome::Closed { freed, disk, .. } = &outcome {
             lock(&state.targets).remove(&id);
-            if let Target::DockerDisk { .. } = &target {
+            let Some(kind) = target.memory_kind() else {
                 let mut h = lock(&state.history);
                 h.record_disk(*disk);
                 let _ = h.save(&state.history_path);
                 return outcome;
-            }
-            let kind = match &target {
-                Target::Procs { kind, .. } => *kind,
-                Target::Container { .. } => Kind::DockerContainer,
-                Target::Model { .. } => Kind::OllamaModel,
-                Target::DockerDisk { .. } => Kind::DockerDisk,
             };
             let kind = serde_json::to_value(kind).ok().and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default();
             let mut h = lock(&state.history);
@@ -927,6 +932,16 @@ mod tests {
             host_root: None,
             growth: None,
         }
+    }
+
+    #[test]
+    fn docker_clean_ups_free_disk_not_memory() {
+        let disk = Target::DockerDisk { key: "docker:build-cache".into(), which: DiskWhich::BuildCache };
+        assert_eq!(disk.memory_kind(), None);
+        let model = Target::Model { key: "ollama:llama3".into(), name: "llama3".into(), memory: MB };
+        assert_eq!(model.memory_kind(), Some(Kind::OllamaModel));
+        let container = Target::Container { key: "docker:web".into(), id: "abc".into(), name: "web".into(), memory: MB };
+        assert_eq!(container.memory_kind(), Some(Kind::DockerContainer));
     }
 
     #[test]
