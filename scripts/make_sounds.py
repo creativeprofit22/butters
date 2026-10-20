@@ -11,6 +11,7 @@ Each sound is timed to its animation (see src/lib/motion.ts and Row.svelte):
 All are mixed far below full scale (peaks around -18 dBFS) so they never startle.
 No samples, no licences: everything is generated here.
 """
+
 import math
 import random
 import struct
@@ -76,7 +77,9 @@ def bell(dur, freq, decay):
     for i in range(n):
         t = i / SR
         g = math.exp(-t / decay)
-        v = math.sin(2 * math.pi * freq * t) + 0.18 * math.sin(2 * math.pi * freq * 2 * t) * math.exp(-t / (decay * 0.4))
+        v = math.sin(2 * math.pi * freq * t) + 0.18 * math.sin(2 * math.pi * freq * 2 * t) * math.exp(
+            -t / (decay * 0.4)
+        )
         out.append(v * g)
     return out
 
@@ -155,11 +158,19 @@ write(
 
 # freed: warm chime as the savings card plops in, second note as the number lands
 c5, a5 = 523.25, 880.0
-write("freed", mix((plop(0.14, 380, 160), 0, 0.6), (bell(1.1, c5, 0.35), ms(60), 0.8), (bell(1.1, a5, 0.4), ms(240), 0.55)), peak_db=-18)
+write(
+    "freed",
+    mix((plop(0.14, 380, 160), 0, 0.6), (bell(1.1, c5, 0.35), ms(60), 0.8), (bell(1.1, a5, 0.4), ms(240), 0.55)),
+    peak_db=-18,
+)
 
 # close: short soft downward fwip, matching the 220 ms slump
 fw = sine_sweep(0.16, 380, 150, shape=1.4)
 fwn = lowpass([random.uniform(-1, 1) for _ in fw], 900)
-write("close", lowpass([(a * 0.8 + b * 0.5) * g for a, b, g in zip(fw, fwn, env(len(fw), 0.006, 0.14, 2))], 1500), peak_db=-24)
+write(
+    "close",
+    lowpass([(a * 0.8 + b * 0.5) * g for a, b, g in zip(fw, fwn, env(len(fw), 0.006, 0.14, 2))], 1500),
+    peak_db=-24,
+)
 
 print("sounds written to", OUT)

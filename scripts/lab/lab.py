@@ -15,6 +15,7 @@ has one, and either an "orphan" parent (the terminal that started it is gone)
 or a terminal shell that is still open. Native tools are played by hog.rs,
 copied to the real tool's path and name.
 """
+
 import json
 import os
 import shutil
@@ -78,11 +79,46 @@ S("vite-pnpm", "Vite via pnpm dev", "pretick", "pnpm", pkg="vite", bin="bin/vite
 S("next", "Next.js dev (next-server child)", "pretick", "next", port=3000)
 S("nuxt", "Nuxt dev", "pretick", "node", pkg="nuxi", bin="bin/nuxi.mjs", args=["dev"], port=3001)
 S("astro", "Astro dev", "pretick", "node", pkg="astro", bin="astro.js", args=["dev"], port=4321)
-S("remix", "React Router / Remix dev", "pretick", "node", pkg="@react-router/dev", bin="bin.js", args=["dev"], port=5175)
+S(
+    "remix",
+    "React Router / Remix dev",
+    "pretick",
+    "node",
+    pkg="@react-router/dev",
+    bin="bin.js",
+    args=["dev"],
+    port=5175,
+)
 S("sveltekit", "SvelteKit (vite dev)", "pretick", "node", pkg="vite", bin="bin/vite.js", args=["dev"], port=5176)
-S("storybook", "Storybook", "pretick", "node", pkg="storybook", bin="bin/index.cjs", args=["dev", "-p", "6006"], port=6006)
-S("webpack", "webpack-dev-server", "pretick", "node", pkg="webpack-dev-server", bin="bin/webpack-dev-server.js", port=8080)
-S("wrangler", "Cloudflare wrangler dev", "pretick", "node", pkg="wrangler", bin="bin/wrangler.js", args=["dev"], port=8787)
+S(
+    "storybook",
+    "Storybook",
+    "pretick",
+    "node",
+    pkg="storybook",
+    bin="bin/index.cjs",
+    args=["dev", "-p", "6006"],
+    port=6006,
+)
+S(
+    "webpack",
+    "webpack-dev-server",
+    "pretick",
+    "node",
+    pkg="webpack-dev-server",
+    bin="bin/webpack-dev-server.js",
+    port=8080,
+)
+S(
+    "wrangler",
+    "Cloudflare wrangler dev",
+    "pretick",
+    "node",
+    pkg="wrangler",
+    bin="bin/wrangler.js",
+    args=["dev"],
+    port=8787,
+)
 S("convex", "Convex dev", "pretick", "node", pkg="convex", bin="bin/main.js", args=["dev"])
 S("bun-dev", "bun --hot server", "pretick", "bun", script="server.ts", port=3002)
 S("deno-dev", "deno task dev", "pretick", "deno", script="main.ts", port=8000)
@@ -90,70 +126,289 @@ S("http-server", "npx http-server", "pretick", "node", pkg="http-server", bin="b
 S("plain-node", "node server.js on a port", "pretick", "node-script", script="server.js", port=3003)
 # ---- mobile ----
 S("expo", "Expo start (Metro)", "pretick", "node", pkg="expo", bin="bin/cli", args=["start"], port=8082)
-S("rn-metro", "React Native Metro bundler", "pretick", "node", pkg="react-native", bin="cli.js", args=["start"], port=8083)
-S("flutter", "flutter run (dart tool)", "pretick", "native", exe=N("flutter/bin/cache/dart-sdk/bin/dart", "flutter/bin/cache/dart-sdk/bin/dart.exe"),
-  argv=["dart", "--packages=x", "{native}/flutter/bin/cache/flutter_tools.snapshot", "run"], mb=400)
-S("android-emu", "Android emulator (qemu)", "suggest", "native", orphan=False, mb=900,
-  exe=N("Library/Android/sdk/emulator/qemu/darwin-aarch64/qemu-system-aarch64", "AppData/Local/Android/Sdk/emulator/qemu/windows-x86_64/qemu-system-x86_64.exe"),
-  argv=["qemu-system", "-avd", "Pixel_8"])
-S("gradle", "Gradle daemon (Android build)", "suggest", "native", mb=700, exe=N("jdk/bin/java", "jdk/bin/java.exe"),
-  argv=["java", "-Xmx2g", "-cp", "gradle-launcher.jar", "org.gradle.launcher.daemon.bootstrap.GradleDaemon", "8.10"])
+S(
+    "rn-metro",
+    "React Native Metro bundler",
+    "pretick",
+    "node",
+    pkg="react-native",
+    bin="cli.js",
+    args=["start"],
+    port=8083,
+)
+S(
+    "flutter",
+    "flutter run (dart tool)",
+    "pretick",
+    "native",
+    exe=N("flutter/bin/cache/dart-sdk/bin/dart", "flutter/bin/cache/dart-sdk/bin/dart.exe"),
+    argv=["dart", "--packages=x", "{native}/flutter/bin/cache/flutter_tools.snapshot", "run"],
+    mb=400,
+)
+S(
+    "android-emu",
+    "Android emulator (qemu)",
+    "suggest",
+    "native",
+    orphan=False,
+    mb=900,
+    exe=N(
+        "Library/Android/sdk/emulator/qemu/darwin-aarch64/qemu-system-aarch64",
+        "AppData/Local/Android/Sdk/emulator/qemu/windows-x86_64/qemu-system-x86_64.exe",
+    ),
+    argv=["qemu-system", "-avd", "Pixel_8"],
+)
+S(
+    "gradle",
+    "Gradle daemon (Android build)",
+    "suggest",
+    "native",
+    mb=700,
+    exe=N("jdk/bin/java", "jdk/bin/java.exe"),
+    argv=["java", "-Xmx2g", "-cp", "gradle-launcher.jar", "org.gradle.launcher.daemon.bootstrap.GradleDaemon", "8.10"],
+)
 # ---- python / ruby / go / rust / php ----
 S("uvicorn", "FastAPI via uvicorn", "pretick", "py", mod="uvicorn", args=["main:app", "--reload"], port=8001)
 S("django", "Django runserver", "pretick", "py-script", script="manage.py", args=["runserver"], port=8002)
 S("flask", "flask run", "pretick", "py", mod="flask", args=["run", "--port", "5050"], port=5050)
 S("streamlit", "Streamlit", "pretick", "py", mod="streamlit", args=["run", "app.py"], port=8501)
 S("jupyter", "Jupyter Lab", "pretick", "py", mod="jupyterlab", port=8888)
-S("py-http", "python -m http.server", "pretick", "py", mod="http.server", args=["8003", "--bind", "127.0.0.1"], port=8003, real=True)
-S("rails", "Rails server (puma)", "pretick", "native", exe=N("ruby/bin/ruby", "ruby/bin/ruby.exe"), argv=["ruby", "bin/rails", "server"], port=3004)
+S(
+    "py-http",
+    "python -m http.server",
+    "pretick",
+    "py",
+    mod="http.server",
+    args=["8003", "--bind", "127.0.0.1"],
+    port=8003,
+    real=True,
+)
+S(
+    "rails",
+    "Rails server (puma)",
+    "pretick",
+    "native",
+    exe=N("ruby/bin/ruby", "ruby/bin/ruby.exe"),
+    argv=["ruby", "bin/rails", "server"],
+    port=3004,
+)
 S("go-air", "Go air live reload", "pretick", "native", exe=N("go/bin/air", "go/bin/air.exe"), argv=["air"], port=8004)
-S("go-run", "go run ./cmd/api (built binary on a port)", "pretick", "native",
-  exe=N("var/folders/T/go-build2731/b001/exe/api", "AppData/Local/Temp/go-build2731/b001/exe/api.exe"), argv=["api"], port=8005)
-S("cargo-watch", "cargo watch -x run", "pretick", "native", exe=N(".cargo/bin/cargo-watch", ".cargo/bin/cargo-watch.exe"), argv=["cargo-watch", "-x", "run"])
-S("php", "php -S localhost", "pretick", "native", exe=N("php/bin/php", "php/php.exe"), argv=["php", "-S", "127.0.0.1:8006"], port=8006)
+S(
+    "go-run",
+    "go run ./cmd/api (built binary on a port)",
+    "pretick",
+    "native",
+    exe=N("var/folders/T/go-build2731/b001/exe/api", "AppData/Local/Temp/go-build2731/b001/exe/api.exe"),
+    argv=["api"],
+    port=8005,
+)
+S(
+    "cargo-watch",
+    "cargo watch -x run",
+    "pretick",
+    "native",
+    exe=N(".cargo/bin/cargo-watch", ".cargo/bin/cargo-watch.exe"),
+    argv=["cargo-watch", "-x", "run"],
+)
+S(
+    "php",
+    "php -S localhost",
+    "pretick",
+    "native",
+    exe=N("php/bin/php", "php/php.exe"),
+    argv=["php", "-S", "127.0.0.1:8006"],
+    port=8006,
+)
 # ---- coding agents ----
 CLAUDE = N(".local/share/claude/versions/2.1.288", ".local/bin/claude.exe")
 S("claude", "Claude Code session", "pretick", "native", exe=CLAUDE, argv=["claude"], mb=300)
-S("claude-in-term", "Claude Code in an open terminal", "suggest", "native", exe=CLAUDE, argv=["claude", "--resume"], mb=300, orphan=False)
+S(
+    "claude-in-term",
+    "Claude Code in an open terminal",
+    "suggest",
+    "native",
+    exe=CLAUDE,
+    argv=["claude", "--resume"],
+    mb=300,
+    orphan=False,
+)
 S("codex", "Codex CLI (node)", "pretick", "node", pkg="@openai/codex", bin="bin/codex.js", mb=200)
-S("codex-native", "Codex native binary", "pretick", "native", mb=200,
-  exe=N("@openai/codex/vendor/aarch64-apple-darwin/codex/codex", "@openai/codex/vendor/x86_64-pc-windows-msvc/codex/codex.exe"), argv=["codex"])
+S(
+    "codex-native",
+    "Codex native binary",
+    "pretick",
+    "native",
+    mb=200,
+    exe=N(
+        "@openai/codex/vendor/aarch64-apple-darwin/codex/codex",
+        "@openai/codex/vendor/x86_64-pc-windows-msvc/codex/codex.exe",
+    ),
+    argv=["codex"],
+)
 S("gemini", "Gemini CLI", "pretick", "node", pkg="@google/gemini-cli", bin="dist/index.js", mb=200)
-S("opencode", "OpenCode", "pretick", "native", exe=N(".opencode/bin/opencode", ".opencode/bin/opencode.exe"), argv=["opencode"], mb=200)
-S("aider", "Aider (python)", "pretick", "native", exe=N("py/bin/python3", "py/python.exe"), argv=["python3", "{native}/.local/bin/aider"], mb=200)
-S("goose", "Goose", "pretick", "native", exe=N(".local/bin/goose", ".local/bin/goose.exe"), argv=["goose", "session"], mb=200)
+S(
+    "opencode",
+    "OpenCode",
+    "pretick",
+    "native",
+    exe=N(".opencode/bin/opencode", ".opencode/bin/opencode.exe"),
+    argv=["opencode"],
+    mb=200,
+)
+S(
+    "aider",
+    "Aider (python)",
+    "pretick",
+    "native",
+    exe=N("py/bin/python3", "py/python.exe"),
+    argv=["python3", "{native}/.local/bin/aider"],
+    mb=200,
+)
+S(
+    "goose",
+    "Goose",
+    "pretick",
+    "native",
+    exe=N(".local/bin/goose", ".local/bin/goose.exe"),
+    argv=["goose", "session"],
+    mb=200,
+)
 S("ggcoder", "GG Coder CLI", "pretick", "node", pkg="@kenkaiiii/ggcoder", bin="dist/cli.js", mb=200)
-S("cursor-agent", "Cursor Agent", "pretick", "native", exe=N(".local/bin/cursor-agent", ".local/bin/cursor-agent.exe"), argv=["cursor-agent"], mb=200)
+S(
+    "cursor-agent",
+    "Cursor Agent",
+    "pretick",
+    "native",
+    exe=N(".local/bin/cursor-agent", ".local/bin/cursor-agent.exe"),
+    argv=["cursor-agent"],
+    mb=200,
+)
 S("amp", "Amp", "pretick", "node", pkg="@sourcegraph/amp", bin="dist/main.js", mb=200)
 S("copilot", "GitHub Copilot CLI", "pretick", "node", pkg="@github/copilot", bin="index.js", mb=200)
-S("droid", "Factory Droid", "pretick", "native", exe=N(".factory/bin/droid", ".factory/bin/droid.exe"), argv=["droid"], mb=200)
+S(
+    "droid",
+    "Factory Droid",
+    "pretick",
+    "native",
+    exe=N(".factory/bin/droid", ".factory/bin/droid.exe"),
+    argv=["droid"],
+    mb=200,
+)
 # ---- MCP servers (their agent session ended) ----
 S("mcp-playwright", "Playwright MCP via npx", "pretick", "npx", pkg="@playwright/mcp", bin="cli.js", mb=60)
-S("mcp-memory", "MCP memory server", "pretick", "node", pkg="@modelcontextprotocol/server-memory", bin="dist/index.js", mb=60)
+S(
+    "mcp-memory",
+    "MCP memory server",
+    "pretick",
+    "node",
+    pkg="@modelcontextprotocol/server-memory",
+    bin="dist/index.js",
+    mb=60,
+)
 S("mcp-py", "Python MCP via uvx", "pretick", "py", mod="mcp_server_fetch", mb=60)
 S("mcp-context7", "Context7 MCP", "pretick", "node", pkg="@upstash/context7-mcp", bin="dist/index.js", mb=60)
 # ---- watchers / builds / leaks / CPU ----
 S("tsc-watch", "tsc --watch", "pretick", "node", pkg="typescript", bin="bin/tsc", args=["--watch"], mb=150)
 S("vitest", "vitest watch", "pretick", "node", pkg="vitest", bin="vitest.mjs", mb=150)
 S("tailwind", "tailwindcss --watch", "pretick", "node", pkg="tailwindcss", bin="lib/cli.js", args=["--watch"], mb=80)
-S("busy", "runaway node build (100% CPU)", "suggest", "node-script", script="build.js", js="spin", orphan=False, aged=False)
+S(
+    "busy",
+    "runaway node build (100% CPU)",
+    "suggest",
+    "node-script",
+    script="build.js",
+    js="spin",
+    orphan=False,
+    aged=False,
+)
 S("leak", "leaking worker", "suggest", "node-script", script="worker.js", js="leak", orphan=False)
 # ---- a busy day: many sessions of the same tools across many projects ----
 for _i, _proj in enumerate(["shop-web", "admin", "landing", "mobile-app", "api", "docs", "blog", "dashboard"]):
-    S(f"many-vite-{_i}", f"Vite in {_proj} (one of 8)", "pretick", "node", pkg="vite", bin="bin/vite.js", args=["--port", str(5200 + _i)], port=5200 + _i)
+    S(
+        f"many-vite-{_i}",
+        f"Vite in {_proj} (one of 8)",
+        "pretick",
+        "node",
+        pkg="vite",
+        bin="bin/vite.js",
+        args=["--port", str(5200 + _i)],
+        port=5200 + _i,
+    )
 for _i in range(6):
-    S(f"many-claude-{_i}", f"Claude Code session {_i + 1} of 6", "pretick", "native", exe=CLAUDE, argv=["claude"], mb=250)
+    S(
+        f"many-claude-{_i}",
+        f"Claude Code session {_i + 1} of 6",
+        "pretick",
+        "native",
+        exe=CLAUDE,
+        argv=["claude"],
+        mb=250,
+    )
 for _i in range(4):
-    S(f"many-mcp-{_i}", f"Playwright MCP {_i + 1} of 4 (one per session)", "pretick", "npx", pkg="@playwright/mcp", bin="cli.js", mb=60)
+    S(
+        f"many-mcp-{_i}",
+        f"Playwright MCP {_i + 1} of 4 (one per session)",
+        "pretick",
+        "npx",
+        pkg="@playwright/mcp",
+        bin="cli.js",
+        mb=60,
+    )
 # ---- must stay alone ----
-S("fresh-vite", "Vite you started a minute ago (in a terminal)", "quiet", "npm", pkg="vite", bin="bin/vite.js", port=5177, orphan=False, aged=False)
-S("fresh-claude", "Claude Code you're using right now", "quiet", "native", exe=CLAUDE, argv=["claude"], mb=300, orphan=False, aged=False)
-S("small-script", "tiny one-off script (no port, small)", "quiet", "node-script", script="tiny.js", js="idle", mb=5, orphan=False)
-S("redis", "redis-server (a service)", "quiet", "native", exe=N("redis/bin/redis-server", "redis/redis-server.exe"), argv=["redis-server"], port=6380)
-S("postgres", "postgres (a service)", "quiet", "native", exe=N("pg/bin/postgres", "pg/bin/postgres.exe"), argv=["postgres", "-D", "data"], port=5433)
+S(
+    "fresh-vite",
+    "Vite you started a minute ago (in a terminal)",
+    "quiet",
+    "npm",
+    pkg="vite",
+    bin="bin/vite.js",
+    port=5177,
+    orphan=False,
+    aged=False,
+)
+S(
+    "fresh-claude",
+    "Claude Code you're using right now",
+    "quiet",
+    "native",
+    exe=CLAUDE,
+    argv=["claude"],
+    mb=300,
+    orphan=False,
+    aged=False,
+)
+S(
+    "small-script",
+    "tiny one-off script (no port, small)",
+    "quiet",
+    "node-script",
+    script="tiny.js",
+    js="idle",
+    mb=5,
+    orphan=False,
+)
+S(
+    "redis",
+    "redis-server (a service)",
+    "quiet",
+    "native",
+    exe=N("redis/bin/redis-server", "redis/redis-server.exe"),
+    argv=["redis-server"],
+    port=6380,
+)
+S(
+    "postgres",
+    "postgres (a service)",
+    "quiet",
+    "native",
+    exe=N("pg/bin/postgres", "pg/bin/postgres.exe"),
+    argv=["postgres", "-D", "data"],
+    port=5433,
+)
 
 
 # ------------------------------------------------------------------ helpers
+
 
 def state():
     try:
@@ -205,6 +460,7 @@ def native_copy(rel):
 
 # ------------------------------------------------------------------ launching
 
+
 def spawn_orphan(argv, exe, env, cwd):
     """Starts the tool with a parent that exits at once (the terminal is gone)."""
     if WIN:
@@ -215,8 +471,12 @@ def spawn_orphan(argv, exe, env, cwd):
             "stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,"
             "creationflags=0x00000008|0x00000200);print(p.pid)"
         )
-        out = subprocess.run([PY, "-c", helper, json.dumps({"argv": argv, "exe": exe, "cwd": str(cwd), "env": env})],
-                             capture_output=True, text=True, check=True)
+        out = subprocess.run(
+            [PY, "-c", helper, json.dumps({"argv": argv, "exe": exe, "cwd": str(cwd), "env": env})],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
         return int(out.stdout.strip())
     # POSIX double fork: re-parented to launchd/init, its own session.
     r, w = os.pipe()
@@ -243,14 +503,27 @@ def spawn_in_terminal(argv, exe, env, cwd):
     Returns the shell's pid (the scenario's root)."""
     if WIN:
         line = subprocess.list2cmdline([exe, *argv[1:]])
-        shell = subprocess.Popen(["cmd.exe", "/d", "/k", line], cwd=cwd, env=env, stdin=subprocess.PIPE,
-                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                 creationflags=0x00000200 | 0x08000000)
+        shell = subprocess.Popen(
+            ["cmd.exe", "/d", "/k", line],
+            cwd=cwd,
+            env=env,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=0x00000200 | 0x08000000,
+        )
         return shell.pid
     # zsh's ARGV0 sets the tool's argv[0] (e.g. "claude" for the versioned binary).
     line = f"ARGV0={q(argv[0])} {q(exe)} " + " ".join(q(a) for a in argv[1:])
-    shell = subprocess.Popen(["/bin/zsh", "-il"], cwd=cwd, env=env, stdin=subprocess.PIPE,
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    shell = subprocess.Popen(
+        ["/bin/zsh", "-il"],
+        cwd=cwd,
+        env=env,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
     shell.stdin.write((line + "\n").encode())
     shell.stdin.flush()
     return shell.pid
@@ -285,8 +558,12 @@ def launch(sc):
         argv = ["node", str(wrapper), *wargs]
     elif k == "next":
         server = json.dumps(JS["server"])
-        f = pkg_file(proj, "next", "dist/bin/next",
-                     f"require('child_process').spawn(process.execPath,['-e',{server}],{{stdio:'ignore',argv0:'next-server (v15.5.0)'}});setInterval(()=>{{}},1e9)")
+        f = pkg_file(
+            proj,
+            "next",
+            "dist/bin/next",
+            f"require('child_process').spawn(process.execPath,['-e',{server}],{{stdio:'ignore',argv0:'next-server (v15.5.0)'}});setInterval(()=>{{}},1e9)",
+        )
         argv = ["node", str(f), "dev"]
     elif k == "node-script":
         f = write(proj / sc["script"], js)
@@ -294,12 +571,18 @@ def launch(sc):
     elif k == "bun":
         if not BUN:
             return None
-        f = write(proj / sc["script"], f"const b=new Uint8Array(60*1048576).fill(1);Bun.serve({{port:{sc['port']},hostname:'127.0.0.1',fetch(){{return new Response('ok')}}}})")
+        f = write(
+            proj / sc["script"],
+            f"const b=new Uint8Array(60*1048576).fill(1);Bun.serve({{port:{sc['port']},hostname:'127.0.0.1',fetch(){{return new Response('ok')}}}})",
+        )
         exe, argv = BUN, ["bun", "--hot", str(f)]
     elif k == "deno":
         if not DENO:
             return None
-        f = write(proj / sc["script"], f"const b=new Uint8Array(60*1048576).fill(1);Deno.serve({{port:{sc['port']},hostname:'127.0.0.1'}},()=>new Response('ok'))")
+        f = write(
+            proj / sc["script"],
+            f"const b=new Uint8Array(60*1048576).fill(1);Deno.serve({{port:{sc['port']},hostname:'127.0.0.1'}},()=>new Response('ok'))",
+        )
         exe, argv = DENO, ["deno", "run", "-A", "--watch", str(f)]
     elif k == "py":
         mod = sc["mod"]
@@ -328,6 +611,7 @@ def launch(sc):
 
 # ------------------------------------------------------------------ up / down
 
+
 def up():
     if not NODE:
         sys.exit("Node.js is needed for the lab")
@@ -353,9 +637,13 @@ def listening_ports():
     """Every TCP port something on this machine is listening on."""
     if WIN:
         out = subprocess.run(["netstat", "-ano", "-p", "TCP"], capture_output=True, text=True).stdout
-        return {int(l.split()[1].rsplit(":", 1)[1]) for l in out.splitlines() if "LISTENING" in l}
+        return {int(line.split()[1].rsplit(":", 1)[1]) for line in out.splitlines() if "LISTENING" in line}
     out = subprocess.run(["lsof", "-nP", "-iTCP", "-sTCP:LISTEN", "-Fn"], capture_output=True, text=True).stdout
-    return {int(l.rsplit(":", 1)[1]) for l in out.splitlines() if l.startswith("n") and l.rsplit(":", 1)[1].isdigit()}
+    return {
+        int(line.rsplit(":", 1)[1])
+        for line in out.splitlines()
+        if line.startswith("n") and line.rsplit(":", 1)[1].isdigit()
+    }
 
 
 def lab_cmdlines():
@@ -418,8 +706,12 @@ def down(quiet=False):
     # 2. Anything else pointing into the lab (stragglers from an earlier run).
     lab = str(LAB)
     if WIN:
-        ps = ["powershell", "-NoProfile", "-Command",
-              "Get-CimInstance Win32_Process | Select-Object ProcessId,CommandLine,ExecutablePath | ConvertTo-Json -Compress"]
+        ps = [
+            "powershell",
+            "-NoProfile",
+            "-Command",
+            "Get-CimInstance Win32_Process | Select-Object ProcessId,CommandLine,ExecutablePath | ConvertTo-Json -Compress",
+        ]
         out = subprocess.run(ps, capture_output=True, text=True).stdout or "[]"
         rows = json.loads(out)
         for r in rows if isinstance(rows, list) else [rows]:
@@ -435,7 +727,9 @@ def down(quiet=False):
                 _kill(int(pid_s))
                 n += 1
         # Processes whose working folder is in the lab (python -m ...).
-        lsof = subprocess.run(["lsof", "-a", "-d", "cwd", "-u", str(os.getuid()), "-Fpn"], capture_output=True, text=True).stdout
+        lsof = subprocess.run(
+            ["lsof", "-a", "-d", "cwd", "-u", str(os.getuid()), "-Fpn"], capture_output=True, text=True
+        ).stdout
         pid = None
         for line in lsof.splitlines():
             if line.startswith("p"):

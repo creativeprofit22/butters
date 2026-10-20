@@ -29,7 +29,12 @@ toml = re.sub(r'(?m)^version = "[^"]+"', f'version = "{v}"', toml, count=1)
 open("src-tauri/Cargo.toml", "w").write(toml)
 PY
 
-(cd src-tauri && cargo update -p butters --offline >/dev/null 2>&1 || cargo update -p butters >/dev/null)
+(
+  cd src-tauri
+  if ! cargo update -p butters --offline >/dev/null 2>&1; then
+    cargo update -p butters >/dev/null
+  fi
+)
 git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock
 git commit -m "Release v$version"
 git tag "v$version"

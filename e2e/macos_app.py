@@ -23,6 +23,7 @@ Checks:
   7. While closing, the panel stays open even if another app takes focus,
      and a click elsewhere closes it afterwards.
 """
+
 import json
 import os
 import shutil
@@ -49,7 +50,9 @@ ALERTS_Y, SOUNDS_Y = 94, 157
 
 def click(x, y):
     for kind in (Quartz.kCGEventMouseMoved, Quartz.kCGEventLeftMouseDown, Quartz.kCGEventLeftMouseUp):
-        Quartz.CGEventPost(Quartz.kCGHIDEventTap, Quartz.CGEventCreateMouseEvent(None, kind, (x, y), Quartz.kCGMouseButtonLeft))
+        Quartz.CGEventPost(
+            Quartz.kCGHIDEventTap, Quartz.CGEventCreateMouseEvent(None, kind, (x, y), Quartz.kCGMouseButtonLeft)
+        )
         time.sleep(0.05)
 
 
@@ -63,7 +66,11 @@ def shortcut(flags, keycode):
 
 def windows_of(pid):
     wins = Quartz.CGWindowListCopyWindowInfo(Quartz.kCGWindowListOptionOnScreenOnly, Quartz.kCGNullWindowID)
-    return [w for w in wins if w.get("kCGWindowOwnerPID") == pid and w.get("kCGWindowLayer", 0) >= 0 and w["kCGWindowBounds"]["Width"] > 300]
+    return [
+        w
+        for w in wins
+        if w.get("kCGWindowOwnerPID") == pid and w.get("kCGWindowLayer", 0) >= 0 and w["kCGWindowBounds"]["Width"] > 300
+    ]
 
 
 def wait(pred, timeout=8.0, what="condition"):
@@ -123,7 +130,9 @@ def leftover_server():
     # Takes 2.5 s to stop after SIGTERM, like a real app saving on quit.
     script = "require('http').createServer((q,s)=>s.end('ok')).listen(0,'127.0.0.1');setInterval(()=>{},1e9);process.on('SIGTERM',()=>setTimeout(()=>process.exit(0),2500))"
     # Double-fork via sh so the node process is re-parented to launchd (orphaned).
-    out = subprocess.run(["/bin/sh", "-c", f"nohup node -e \"{script}\" >/dev/null 2>&1 & echo $!"], capture_output=True, text=True)
+    out = subprocess.run(
+        ["/bin/sh", "-c", f'nohup node -e "{script}" >/dev/null 2>&1 & echo $!'], capture_output=True, text=True
+    )
     return int(out.stdout.strip())
 
 
@@ -137,7 +146,9 @@ def alive(pid):
 
 def main():
     assert BIN.exists(), f"build the debug app first: {BIN}"
-    was_running = subprocess.run(["pgrep", "-f", "Butters.app/Contents/MacOS/butters"], capture_output=True).returncode == 0
+    was_running = (
+        subprocess.run(["pgrep", "-f", "Butters.app/Contents/MacOS/butters"], capture_output=True).returncode == 0
+    )
     subprocess.run(["pkill", "-f", "Butters.app/Contents/MacOS/butters"])
     time.sleep(1)
     results = []
@@ -154,7 +165,6 @@ def main():
         for attempt in range(2):
             run.at(*SETTINGS_BTN)
             time.sleep(1.2)
-            before = run.saved()
             run.at(SWITCH_X, SOUNDS_Y)
             try:
                 wait(lambda: (v := run.saved()) and v.get("sounds") is False, timeout=4, what="sounds=false")

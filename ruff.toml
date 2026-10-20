@@ -1,0 +1,4 @@
+# Lint + format for the helper scripts (scripts/, e2e/macos_app.py).
+# Lint uses ruff's default rule set.
+line-length = 120
+target-version = "py311"
