@@ -276,123 +276,15 @@ fn do_scan(state: &AppState) -> ScanResult {
     let start_of: HashMap<u32, u64> = procs.iter().map(|p| (p.pid, p.start_time)).collect();
     let seq = state.seq.fetch_add(1, Ordering::Relaxed);
 
-    let only = e2e_only_pid();
-    let mut protected_groups: Vec<(Group, assess::Protection)> = Vec::new();
-    let mut picked: Vec<(Group, String, bool, Option<String>)> = Vec::new();
-    let mut protected = Vec::new();
-    for a in assessed {
-        let g = a.group;
-        match a.verdict {
-            Verdict::Suggest {
-                reason,
-                recommended,
-                note,
-            } => {
-                if only.is_some_and(|pid| !g.members.contains(&pid)) {
-                    continue;
-                }
-                // Identical leftovers (same tool, all orphaned) become one card.
-                let same = picked.iter_mut().find(|(p, r, _, _)| {
-                    g.orphaned
-                        && p.orphaned
-                        && p.kind == g.kind
-                        && base_title(&p.title) == g.title
-                        && *r == reason
-                });
-                match same {
-                    Some((p, _, _, _)) => merge_into(p, g),
-                    None => picked.push((g, reason, recommended, note)),
-                }
-            }
-            Verdict::Protected(p) => {
-                if g.memory >= 150 * MB || g.cpu >= 10.0 {
-                    protected_groups.push((g, p));
-                }
-            }
-            Verdict::Quiet => {}
-        }
-    }
-
-    let mut suggestions = Vec::new();
+    let (picked, protected_groups) = sort_verdicts(assessed, e2e_only_pid());
     let mut targets: HashMap<String, Target> = HashMap::new();
-    for (i, (g, reason, recommended, note)) in picked.into_iter().enumerate() {
+    let mut suggestions = Vec::new();
+    for (i, p) in picked.into_iter().enumerate() {
         let id = format!("p{seq}-{i}");
-        let members: Vec<(u32, u64)> = g
-            .members
-            .iter()
-            .filter_map(|m| start_of.get(m).map(|s| (*m, *s)))
-            .collect();
-        let polite = platform::can_ask_politely(g.app_pid, &g.members);
-        let detail = match (&g.detail, g.ports.is_empty()) {
-            (Some(d), false) => Some(format!("{d} · {}", ports_text(&g.ports))),
-            (None, false) => Some(ports_text(&g.ports)),
-            (d, true) => d.clone(),
-        };
-        suggestions.push(Suggestion {
-            id: id.clone(),
-            key: format!("{}#{}", g.key, g.root),
-            kind: g.kind,
-            title: g.title.clone(),
-            detail,
-            reason,
-            note,
-            memory: g.memory,
-            cpu: g.cpu,
-            ports: g.ports.clone(),
-            recommended,
-            polite,
-            verb: if g.app_pid.is_some() { "Quit" } else { "Stop" },
-            disk: 0,
-        });
-        targets.insert(
-            id,
-            Target::Procs {
-                key: g.key.clone(),
-                kind: g.kind,
-                target: ProcTarget {
-                    title: g.title.clone(),
-                    members,
-                    app_pid: g.app_pid,
-                    memory: g.memory,
-                },
-            },
-        );
+        targets.insert(id.clone(), proc_target(&p.group, &start_of));
+        suggestions.push(proc_suggestion(id, p));
     }
-    protected_groups.sort_by_key(|(g, _)| std::cmp::Reverse(g.memory));
-    protected_groups.truncate(12);
-    for (i, (g, p)) in protected_groups.into_iter().enumerate() {
-        let id = p.user_closable().then(|| format!("x{seq}-{i}"));
-        if let Some(id) = &id {
-            let members: Vec<(u32, u64)> = g
-                .members
-                .iter()
-                .filter_map(|m| start_of.get(m).map(|s| (*m, *s)))
-                .collect();
-            targets.insert(
-                id.clone(),
-                Target::Procs {
-                    key: g.key.clone(),
-                    kind: g.kind,
-                    target: ProcTarget {
-                        title: g.title.clone(),
-                        members,
-                        app_pid: g.app_pid,
-                        memory: g.memory,
-                    },
-                },
-            );
-        }
-        protected.push(Protected {
-            id,
-            key: format!("{}#{}", g.key, g.root),
-            verb: if g.app_pid.is_some() { "Quit" } else { "Stop" },
-            title: g.title,
-            kind: g.kind,
-            memory: g.memory,
-            cpu: g.cpu,
-            reason: p.text(),
-        });
-    }
+    let protected = protected_cards(protected_groups, seq, &start_of, &mut targets);
     suggestions.sort_by(|a, b| {
         b.recommended
             .cmp(&a.recommended)
@@ -423,6 +315,141 @@ fn do_scan(state: &AppState) -> ScanResult {
         watched_secs: ctx.watched_secs,
         scan_ms: t0.elapsed().as_millis() as u64,
     }
+}
+
+/// A process group the scan suggests closing, with the verdict's wording.
+struct Picked {
+    group: Group,
+    reason: String,
+    recommended: bool,
+    note: Option<String>,
+}
+
+/// Splits assessed groups into suggestions (identical leftovers merged into
+/// one card) and heavy protected groups worth showing.
+fn sort_verdicts(
+    assessed: Vec<assess::Assessed>,
+    only: Option<u32>,
+) -> (Vec<Picked>, Vec<(Group, assess::Protection)>) {
+    let mut picked: Vec<Picked> = Vec::new();
+    let mut protected_groups: Vec<(Group, assess::Protection)> = Vec::new();
+    for a in assessed {
+        let g = a.group;
+        match a.verdict {
+            Verdict::Suggest {
+                reason,
+                recommended,
+                note,
+            } => {
+                if only.is_some_and(|pid| !g.members.contains(&pid)) {
+                    continue;
+                }
+                // Identical leftovers (same tool, all orphaned) become one card.
+                let same = picked.iter_mut().find(|p| {
+                    g.orphaned
+                        && p.group.orphaned
+                        && p.group.kind == g.kind
+                        && base_title(&p.group.title) == g.title
+                        && p.reason == reason
+                });
+                match same {
+                    Some(p) => merge_into(&mut p.group, g),
+                    None => picked.push(Picked {
+                        group: g,
+                        reason,
+                        recommended,
+                        note,
+                    }),
+                }
+            }
+            Verdict::Protected(p) => {
+                if g.memory >= 150 * MB || g.cpu >= 10.0 {
+                    protected_groups.push((g, p));
+                }
+            }
+            Verdict::Quiet => {}
+        }
+    }
+    (picked, protected_groups)
+}
+
+/// The close target for a process group, pinned to each member's start time.
+fn proc_target(g: &Group, start_of: &HashMap<u32, u64>) -> Target {
+    let members: Vec<(u32, u64)> = g
+        .members
+        .iter()
+        .filter_map(|m| start_of.get(m).map(|s| (*m, *s)))
+        .collect();
+    Target::Procs {
+        key: g.key.clone(),
+        kind: g.kind,
+        target: ProcTarget {
+            title: g.title.clone(),
+            members,
+            app_pid: g.app_pid,
+            memory: g.memory,
+        },
+    }
+}
+
+fn proc_verb(g: &Group) -> &'static str {
+    if g.app_pid.is_some() { "Quit" } else { "Stop" }
+}
+
+fn proc_suggestion(id: String, p: Picked) -> Suggestion {
+    let g = p.group;
+    let polite = platform::can_ask_politely(g.app_pid, &g.members);
+    let detail = match (&g.detail, g.ports.is_empty()) {
+        (Some(d), false) => Some(format!("{d} · {}", ports_text(&g.ports))),
+        (None, false) => Some(ports_text(&g.ports)),
+        (d, true) => d.clone(),
+    };
+    Suggestion {
+        id,
+        key: format!("{}#{}", g.key, g.root),
+        kind: g.kind,
+        verb: proc_verb(&g),
+        title: g.title,
+        detail,
+        reason: p.reason,
+        note: p.note,
+        memory: g.memory,
+        cpu: g.cpu,
+        ports: g.ports,
+        recommended: p.recommended,
+        polite,
+        disk: 0,
+    }
+}
+
+/// The heaviest protected groups as cards; those the user may close anyway
+/// get an id and a target.
+fn protected_cards(
+    mut groups: Vec<(Group, assess::Protection)>,
+    seq: u64,
+    start_of: &HashMap<u32, u64>,
+    targets: &mut HashMap<String, Target>,
+) -> Vec<Protected> {
+    groups.sort_by_key(|(g, _)| std::cmp::Reverse(g.memory));
+    groups.truncate(12);
+    let mut protected = Vec::new();
+    for (i, (g, p)) in groups.into_iter().enumerate() {
+        let id = p.user_closable().then(|| format!("x{seq}-{i}"));
+        if let Some(id) = &id {
+            targets.insert(id.clone(), proc_target(&g, start_of));
+        }
+        protected.push(Protected {
+            id,
+            key: format!("{}#{}", g.key, g.root),
+            verb: proc_verb(&g),
+            title: g.title,
+            kind: g.kind,
+            memory: g.memory,
+            cpu: g.cpu,
+            reason: p.text(),
+        });
+    }
+    protected
 }
 
 fn base_title(t: &str) -> &str {
@@ -582,11 +609,65 @@ fn do_scan_services(state: &AppState) -> ServicesResult {
     let mut targets = HashMap::new();
 
     observe_docker(state, containers.as_deref());
+    container_cards(
+        state,
+        containers.as_deref().unwrap_or_default(),
+        seq,
+        &ignored,
+        &mut suggestions,
+        &mut targets,
+    );
+    if let Some(d) = disk {
+        docker_disk_cards(d, seq, &ignored, &mut suggestions, &mut targets);
+    }
+    model_cards(
+        models.as_deref().unwrap_or_default(),
+        seq,
+        &ignored,
+        &mut suggestions,
+        &mut targets,
+    );
+    {
+        let mut t = lock(&state.targets);
+        t.retain(|_, v| matches!(v, Target::Procs { .. }));
+        t.extend(targets);
+    }
+    {
+        let mut sw = lock(&state.sweepable);
+        sw.retain(|id| id.starts_with('p'));
+        sw.extend(
+            suggestions
+                .iter()
+                .filter(|s| sweepable(s))
+                .map(|s| s.id.clone()),
+        );
+    }
+    let result = ServicesResult {
+        suggestions,
+        docker: if containers.is_some() {
+            "running"
+        } else {
+            "off"
+        },
+        ollama: if models.is_some() { "running" } else { "off" },
+    };
+    *lock(&state.services_cache) = Some(result.clone());
+    result
+}
+
+/// Containers measured quiet for an hour or more; a day pre-ticks them.
+fn container_cards(
+    state: &AppState,
+    containers: &[services::Container],
+    seq: u64,
+    ignored: &[String],
+    suggestions: &mut Vec<Suggestion>,
+    targets: &mut HashMap<String, Target>,
+) {
     let now = history::now_secs();
-    for (i, c) in containers.iter().flatten().enumerate() {
+    for (i, c) in containers.iter().enumerate() {
         let key = format!("docker:{}", c.name);
         let idle = lock(&state.docker_activity).idle(&c.id, now);
-        // Only containers measured quiet for an hour or more; a day pre-ticks it.
         let Some(idle) = idle.filter(|i| i.secs >= 60 * 60) else {
             continue;
         };
@@ -628,89 +709,106 @@ fn do_scan_services(state: &AppState) -> ServicesResult {
             },
         );
     }
-    // Disk Docker can give back without touching anything you use.
-    if let Some(d) = disk {
-        let cache_reason = match d.build_cache_idle {
-            Some(secs) if secs >= DAY => {
-                format!("Unused {}, rebuilds if needed", fmt_duration(secs))
-            }
-            _ => "Rebuilds when needed".to_string(),
-        };
-        let old_count = d.old_images.len();
-        let old_bytes: u64 = d.old_images.iter().map(|i| i.size).sum();
-        let old_refs: Vec<String> = d.old_images.iter().map(|i| i.reference.clone()).collect();
-        let old_detail = d
-            .old_images
-            .iter()
-            .map(|i| {
-                i.reference
-                    .rsplit('/')
-                    .next()
-                    .unwrap_or(&i.reference)
-                    .to_string()
-            })
-            .collect::<Vec<_>>()
-            .join(", ");
-        let items = [
-            (
-                DiskWhich::BuildCache,
-                "docker:build-cache",
-                "Docker build cache".to_string(),
-                cache_reason,
-                None,
-                d.build_cache,
-                GB_U,
-            ),
-            (
-                DiskWhich::DanglingImages,
-                "docker:dangling",
-                "Untagged Docker images".to_string(),
-                "Left over from rebuilds".to_string(),
-                None,
-                d.dangling_images,
-                500 * MB,
-            ),
-            (
-                DiskWhich::OldImages(old_refs),
-                "docker:old-images",
-                format!("Old image versions ×{old_count}"),
-                "Newer version kept, none in use".to_string(),
-                Some(old_detail),
-                old_bytes,
-                GB_U,
-            ),
-        ];
-        for (i, (which, key, title, reason, detail, bytes, min)) in items.into_iter().enumerate() {
-            if bytes < min || ignored.iter().any(|k| k == key) {
-                continue;
-            }
-            let id = format!("k{seq}-{i}");
-            suggestions.push(Suggestion {
-                id: id.clone(),
-                key: key.to_string(),
-                kind: Kind::DockerDisk,
-                title,
-                detail,
-                reason,
-                note: None,
-                memory: 0,
-                cpu: 0.0,
-                ports: Vec::new(),
-                recommended: false,
-                polite: true,
-                verb: "Clear",
-                disk: bytes,
-            });
-            targets.insert(
-                id,
-                Target::DockerDisk {
-                    key: key.to_string(),
-                    which,
-                },
-            );
+}
+
+/// Disk Docker can give back without touching anything you use.
+fn docker_disk_cards(
+    d: services::DockerDisk,
+    seq: u64,
+    ignored: &[String],
+    suggestions: &mut Vec<Suggestion>,
+    targets: &mut HashMap<String, Target>,
+) {
+    let cache_reason = match d.build_cache_idle {
+        Some(secs) if secs >= DAY => {
+            format!("Unused {}, rebuilds if needed", fmt_duration(secs))
         }
+        _ => "Rebuilds when needed".to_string(),
+    };
+    let old_count = d.old_images.len();
+    let old_bytes: u64 = d.old_images.iter().map(|i| i.size).sum();
+    let old_refs: Vec<String> = d.old_images.iter().map(|i| i.reference.clone()).collect();
+    let old_detail = d
+        .old_images
+        .iter()
+        .map(|i| {
+            i.reference
+                .rsplit('/')
+                .next()
+                .unwrap_or(&i.reference)
+                .to_string()
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let items = [
+        (
+            DiskWhich::BuildCache,
+            "docker:build-cache",
+            "Docker build cache".to_string(),
+            cache_reason,
+            None,
+            d.build_cache,
+            GB_U,
+        ),
+        (
+            DiskWhich::DanglingImages,
+            "docker:dangling",
+            "Untagged Docker images".to_string(),
+            "Left over from rebuilds".to_string(),
+            None,
+            d.dangling_images,
+            500 * MB,
+        ),
+        (
+            DiskWhich::OldImages(old_refs),
+            "docker:old-images",
+            format!("Old image versions ×{old_count}"),
+            "Newer version kept, none in use".to_string(),
+            Some(old_detail),
+            old_bytes,
+            GB_U,
+        ),
+    ];
+    for (i, (which, key, title, reason, detail, bytes, min)) in items.into_iter().enumerate() {
+        if bytes < min || ignored.iter().any(|k| k == key) {
+            continue;
+        }
+        let id = format!("k{seq}-{i}");
+        suggestions.push(Suggestion {
+            id: id.clone(),
+            key: key.to_string(),
+            kind: Kind::DockerDisk,
+            title,
+            detail,
+            reason,
+            note: None,
+            memory: 0,
+            cpu: 0.0,
+            ports: Vec::new(),
+            recommended: false,
+            polite: true,
+            verb: "Clear",
+            disk: bytes,
+        });
+        targets.insert(
+            id,
+            Target::DockerDisk {
+                key: key.to_string(),
+                which,
+            },
+        );
     }
-    for (i, m) in models.iter().flatten().enumerate() {
+}
+
+/// Loaded Ollama models; recommended when they'd stay loaded a long while.
+fn model_cards(
+    models: &[services::LoadedModel],
+    seq: u64,
+    ignored: &[String],
+    suggestions: &mut Vec<Suggestion>,
+    targets: &mut HashMap<String, Target>,
+) {
+    for (i, m) in models.iter().enumerate() {
         let key = format!("ollama:{}", m.name);
         if ignored.contains(&key) {
             continue;
@@ -749,32 +847,6 @@ fn do_scan_services(state: &AppState) -> ServicesResult {
             },
         );
     }
-    {
-        let mut t = lock(&state.targets);
-        t.retain(|_, v| matches!(v, Target::Procs { .. }));
-        t.extend(targets);
-    }
-    {
-        let mut sw = lock(&state.sweepable);
-        sw.retain(|id| id.starts_with('p'));
-        sw.extend(
-            suggestions
-                .iter()
-                .filter(|s| sweepable(s))
-                .map(|s| s.id.clone()),
-        );
-    }
-    let result = ServicesResult {
-        suggestions,
-        docker: if containers.is_some() {
-            "running"
-        } else {
-            "off"
-        },
-        ollama: if models.is_some() { "running" } else { "off" },
-    };
-    *lock(&state.services_cache) = Some(result.clone());
-    result
 }
 
 fn blocking_err(e: impl std::fmt::Display) -> String {

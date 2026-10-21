@@ -190,254 +190,297 @@ fn shorten_home(path: &str) -> String {
     }
 }
 
+/// A group with no totals yet; `add_totals` fills memory, cpu, ports, idle.
+fn new_group(key: String, kind: Kind, title: String, root: u32, members: Vec<u32>) -> Group {
+    Group {
+        key,
+        kind,
+        title,
+        detail: None,
+        root,
+        members,
+        app_pid: None,
+        memory: 0,
+        cpu: 0.0,
+        idle_secs: 0,
+        idle_is_lower_bound: false,
+        orphaned: false,
+        ports: Vec::new(),
+        host_app: None,
+        host_root: None,
+        growth: None,
+    }
+}
+
 pub fn build_groups(procs: &[ProcInfo], self_pid: u32) -> Vec<Group> {
-    let tree = Tree::new(procs);
-    let mut groups: Vec<Group> = Vec::new();
-    let mut claimed: HashSet<u32> = HashSet::new();
+    let mut b = Grouping {
+        tree: Tree::new(procs),
+        self_pid,
+        groups: Vec::new(),
+        claimed: HashSet::new(),
+        app_of: HashMap::new(),
+        app_group_index: HashMap::new(),
+    };
+    b.add_apps(procs);
+    b.attach_vms(procs);
+    b.add_cli_work(procs);
+    b.add_heavy(procs);
+    b.add_totals();
+    b.groups
+}
 
-    // 1. Desktop apps, by bundle (macOS) or program path (Windows).
-    let mut app_members: HashMap<String, Vec<u32>> = HashMap::new();
-    let mut app_of: HashMap<u32, String> = HashMap::new();
-    for p in procs.iter().filter(|p| p.owned_by_user) {
-        // On Windows every .exe would count as an "app"; a recognised tool
-        // (claude.exe, codex.exe, an Android emulator, a go-run server) is
-        // command-line work instead. macOS apps live in .app bundles, so this
-        // only affects plain executables.
-        if p.exe.as_deref().is_some_and(|e| !e.contains(".app/"))
-            && classify::classify_cli(p).is_some()
-        {
-            continue;
-        }
-        if let Some(root) = p.exe.as_deref().and_then(app_root) {
-            app_members.entry(root.clone()).or_default().push(p.pid);
-            app_of.insert(p.pid, root);
-        }
-    }
-    let mut app_group_index: HashMap<String, usize> = HashMap::new();
-    let mut roots: Vec<_> = app_members.into_iter().collect();
-    roots.sort_by(|a, b| a.0.cmp(&b.0));
-    for (root, members) in roots {
-        // The app's own process: the earliest member whose parent is not in the app.
-        let mut main = members
-            .iter()
-            .copied()
-            .filter(|pid| {
-                tree.parent(*pid)
-                    .is_none_or(|pp| app_of.get(&pp) != Some(&root))
+/// State shared by the grouping passes, which run in order: apps first,
+/// then command-line work, then anything heavy left over.
+struct Grouping<'a> {
+    tree: Tree<'a>,
+    self_pid: u32,
+    groups: Vec<Group>,
+    /// Pids already in a group.
+    claimed: HashSet<u32>,
+    /// App root (bundle or program path) of each app process.
+    app_of: HashMap<u32, String>,
+    app_group_index: HashMap<String, usize>,
+}
+
+impl Grouping<'_> {
+    /// The subtree under `root` that no group or app has taken yet.
+    fn unclaimed_subtree(&self, root: u32) -> Vec<u32> {
+        self.tree
+            .subtree(root)
+            .into_iter()
+            .filter(|m| {
+                !self.claimed.contains(m)
+                    && !self.app_of.contains_key(m)
+                    && self.tree.by_pid[m].owned_by_user
             })
-            .collect::<Vec<_>>();
-        main.sort_by_key(|pid| tree.by_pid[pid].start_time);
-        let app_pid = main.first().copied().or(members.first().copied());
-        let name = app_name(&root);
-        let mut ordered = members.clone();
-        if let Some(a) = app_pid {
-            ordered.retain(|m| *m != a);
-            ordered.insert(0, a);
-        }
-        claimed.extend(ordered.iter().copied());
-        app_group_index.insert(root.clone(), groups.len());
-        groups.push(Group {
-            key: format!("app:{root}"),
-            kind: classify_app(&name),
-            title: name,
-            detail: None,
-            root: app_pid.unwrap_or(0),
-            members: ordered,
-            app_pid,
-            memory: 0,
-            cpu: 0.0,
-            idle_secs: 0,
-            idle_is_lower_bound: false,
-            orphaned: false,
-            ports: Vec::new(),
-            host_app: None,
-            host_root: None,
-            growth: None,
-        });
+            .collect()
     }
 
-    // 1b. Virtual machines belong to the app responsible for them, so Docker
-    // Desktop's VM memory counts as Docker's (and quitting Docker frees it).
-    for p in procs {
-        if !p.owned_by_user || claimed.contains(&p.pid) {
-            continue;
+    /// 1. Desktop apps, by bundle (macOS) or program path (Windows).
+    fn add_apps(&mut self, procs: &[ProcInfo]) {
+        let tree = &self.tree;
+        let mut app_members: HashMap<String, Vec<u32>> = HashMap::new();
+        for p in procs.iter().filter(|p| p.owned_by_user) {
+            // On Windows every .exe would count as an "app"; a recognised tool
+            // (claude.exe, codex.exe, an Android emulator, a go-run server) is
+            // command-line work instead. macOS apps live in .app bundles, so this
+            // only affects plain executables.
+            if p.exe.as_deref().is_some_and(|e| !e.contains(".app/"))
+                && classify::classify_cli(p).is_some()
+            {
+                continue;
+            }
+            if let Some(root) = p.exe.as_deref().and_then(app_root) {
+                app_members.entry(root.clone()).or_default().push(p.pid);
+                self.app_of.insert(p.pid, root);
+            }
         }
-        let Some(owner) = p.responsible else { continue };
-        if let Some(g) = groups
-            .iter_mut()
-            .find(|g| g.app_pid.is_some() && g.members.contains(&owner))
-        {
-            g.members.push(p.pid);
-            claimed.insert(p.pid);
+        let mut roots: Vec<_> = app_members.into_iter().collect();
+        roots.sort_by(|a, b| a.0.cmp(&b.0));
+        for (root, members) in roots {
+            // The app's own process: the earliest member whose parent is not in the app.
+            let mut main = members
+                .iter()
+                .copied()
+                .filter(|pid| {
+                    tree.parent(*pid)
+                        .is_none_or(|pp| self.app_of.get(&pp) != Some(&root))
+                })
+                .collect::<Vec<_>>();
+            main.sort_by_key(|pid| tree.by_pid[pid].start_time);
+            let app_pid = main.first().copied().or(members.first().copied());
+            let name = app_name(&root);
+            let mut ordered = members.clone();
+            if let Some(a) = app_pid {
+                ordered.retain(|m| *m != a);
+                ordered.insert(0, a);
+            }
+            self.claimed.extend(ordered.iter().copied());
+            self.app_group_index.insert(root.clone(), self.groups.len());
+            self.groups.push(Group {
+                app_pid,
+                ..new_group(
+                    format!("app:{root}"),
+                    classify_app(&name),
+                    name,
+                    app_pid.unwrap_or(0),
+                    ordered,
+                )
+            });
         }
     }
 
-    // 2. Command-line work: agent sessions, dev servers, MCP servers...
-    let mut by_start: Vec<&ProcInfo> = procs
-        .iter()
-        .filter(|p| p.owned_by_user && !claimed.contains(&p.pid))
-        .collect();
-    // Parents before children: start time, then depth (Windows pids aren't
-    // in start order and start times have one-second resolution).
-    by_start.sort_by_key(|p| (p.start_time, tree.ancestors(p.pid).len(), p.pid));
-    for p in by_start {
-        if claimed.contains(&p.pid) || p.pid == self_pid {
-            continue;
+    /// 1b. Virtual machines belong to the app responsible for them, so Docker
+    /// Desktop's VM memory counts as Docker's (and quitting Docker frees it).
+    fn attach_vms(&mut self, procs: &[ProcInfo]) {
+        for p in procs {
+            if !p.owned_by_user || self.claimed.contains(&p.pid) {
+                continue;
+            }
+            let Some(owner) = p.responsible else { continue };
+            if let Some(g) = self
+                .groups
+                .iter_mut()
+                .find(|g| g.app_pid.is_some() && g.members.contains(&owner))
+            {
+                g.members.push(p.pid);
+                self.claimed.insert(p.pid);
+            }
         }
-        let Some((kind, label)) = classify_cli(p) else {
-            continue;
-        };
-        // Lift to the launcher (npm run dev -> vite): closing that is what the user means.
-        let mut root = p.pid;
-        while let Some(parent) = tree.parent(root) {
-            let pp = tree.by_pid[&parent];
+    }
+
+    /// 2. Command-line work: agent sessions, dev servers, MCP servers...
+    fn add_cli_work(&mut self, procs: &[ProcInfo]) {
+        let mut by_start: Vec<&ProcInfo> = procs
+            .iter()
+            .filter(|p| p.owned_by_user && !self.claimed.contains(&p.pid))
+            .collect();
+        // Parents before children: start time, then depth (Windows pids aren't
+        // in start order and start times have one-second resolution).
+        by_start.sort_by_key(|p| (p.start_time, self.tree.ancestors(p.pid).len(), p.pid));
+        for p in by_start {
+            if self.claimed.contains(&p.pid) || p.pid == self.self_pid {
+                continue;
+            }
+            let Some((kind, label)) = classify_cli(p) else {
+                continue;
+            };
+            let root = self.launcher_of(p.pid);
+            let members = self.unclaimed_subtree(root);
+            if members.is_empty() {
+                continue;
+            }
+            let (host, via_shell) = self.host_of(root);
+            if let Some((app, _)) = &host {
+                let idx = self.app_group_index[app];
+                // Helpers an editor/app started itself (no shell in between) are part of that app.
+                if !via_shell && self.groups[idx].kind != Kind::Terminal {
+                    self.claimed.extend(members.iter().copied());
+                    self.groups[idx].members.extend(members);
+                    continue;
+                }
+            }
+            let rp = self.tree.by_pid[&root];
+            let cwd = p.cwd.as_deref().or(rp.cwd.as_deref()).map(shorten_home);
+            self.claimed.extend(members.iter().copied());
+            let orphan = matches!(
+                kind,
+                Kind::AgentSession
+                    | Kind::McpServer
+                    | Kind::DevServer
+                    | Kind::Watcher
+                    | Kind::LanguageServer
+            ) && !is_daemon_by_design(&label)
+                && orphaned(&self.tree, rp);
+            let key = format!(
+                "{}:{}:{}",
+                kind_slug(kind),
+                label,
+                cwd.clone().unwrap_or_default()
+            );
+            self.groups.push(Group {
+                detail: cwd,
+                orphaned: orphan,
+                host_app: host.as_ref().map(|(a, _)| app_name(a)),
+                host_root: host.map(|(_, pid)| pid),
+                ..new_group(key, kind, cli_title(kind, &label), root, members)
+            });
+        }
+    }
+
+    /// Lifts a tool to its launcher (npm run dev -> vite): closing that is
+    /// what the user means.
+    fn launcher_of(&self, pid: u32) -> u32 {
+        let mut root = pid;
+        while let Some(parent) = self.tree.parent(root) {
+            let pp = self.tree.by_pid[&parent];
             if !pp.owned_by_user
-                || claimed.contains(&parent)
-                || app_of.contains_key(&parent)
+                || self.claimed.contains(&parent)
+                || self.app_of.contains_key(&parent)
                 || !classify::is_wrapper(pp)
             {
                 break;
             }
             root = parent;
         }
-        let members: Vec<u32> = tree
-            .subtree(root)
-            .into_iter()
-            .filter(|m| {
-                !claimed.contains(m) && !app_of.contains_key(m) && tree.by_pid[m].owned_by_user
-            })
-            .collect();
-        if members.is_empty() {
-            continue;
-        }
-        // Find the app this runs inside, and whether a shell sits in between.
+        root
+    }
+
+    /// The app this runs inside (root and app pid), and whether a shell sits
+    /// in between.
+    fn host_of(&self, root: u32) -> (Option<(String, u32)>, bool) {
         let mut via_shell = false;
-        let mut host: Option<(String, u32)> = None;
-        for anc in tree.ancestors(root) {
-            if let Some(app) = app_of.get(&anc) {
-                host = Some((app.clone(), anc));
-                break;
+        for anc in self.tree.ancestors(root) {
+            if let Some(app) = self.app_of.get(&anc) {
+                return (Some((app.clone(), anc)), via_shell);
             }
-            if classify::is_interactive_shell(tree.by_pid[&anc]) {
+            if classify::is_interactive_shell(self.tree.by_pid[&anc]) {
                 via_shell = true;
             }
         }
-        if let Some((app, _)) = &host {
-            let idx = app_group_index[app];
-            let app_kind = groups[idx].kind;
-            // Helpers an editor/app started itself (no shell in between) are part of that app.
-            if !via_shell && app_kind != Kind::Terminal {
-                claimed.extend(members.iter().copied());
-                groups[idx].members.extend(members);
+        (None, via_shell)
+    }
+
+    /// 3. Anything else that is heavy on its own.
+    fn add_heavy(&mut self, procs: &[ProcInfo]) {
+        for p in procs {
+            if !p.owned_by_user || self.claimed.contains(&p.pid) || p.pid == self.self_pid {
                 continue;
             }
+            // Big, busy, or steadily growing (leak watch measured it climbing).
+            if classify::is_shell(p)
+                || !(p.memory >= 400 * MB || p.cpu >= 40.0 || p.growth.is_some())
+            {
+                continue;
+            }
+            let members = self.unclaimed_subtree(p.pid);
+            self.claimed.extend(members.iter().copied());
+            let name = p.name.split_whitespace().next().unwrap_or(&p.name);
+            let name = name
+                .strip_suffix(".exe")
+                .or_else(|| name.strip_suffix(".EXE"))
+                .unwrap_or(name)
+                .to_string();
+            self.groups.push(Group {
+                detail: p.cwd.as_deref().map(shorten_home),
+                ..new_group(
+                    format!("process:{}", classify::base(&name)),
+                    Kind::Process,
+                    name,
+                    p.pid,
+                    members,
+                )
+            });
         }
-        let rp = tree.by_pid[&root];
-        let cwd = p.cwd.as_deref().or(rp.cwd.as_deref()).map(shorten_home);
-        claimed.extend(members.iter().copied());
-        let orphan = matches!(
-            kind,
-            Kind::AgentSession
-                | Kind::McpServer
-                | Kind::DevServer
-                | Kind::Watcher
-                | Kind::LanguageServer
-        ) && !is_daemon_by_design(&label)
-            && orphaned(&tree, rp);
-        groups.push(Group {
-            key: format!(
-                "{}:{}:{}",
-                kind_slug(kind),
-                label,
-                cwd.clone().unwrap_or_default()
-            ),
-            kind,
-            title: cli_title(kind, &label),
-            detail: cwd,
-            root,
-            members,
-            app_pid: None,
-            memory: 0,
-            cpu: 0.0,
-            idle_secs: 0,
-            idle_is_lower_bound: false,
-            orphaned: orphan,
-            ports: Vec::new(),
-            host_app: host.as_ref().map(|(a, _)| app_name(a)),
-            host_root: host.map(|(_, pid)| pid),
-            growth: None,
-        });
     }
 
-    // 3. Anything else that is heavy on its own.
-    for p in procs {
-        if !p.owned_by_user || claimed.contains(&p.pid) || p.pid == self_pid {
-            continue;
-        }
-        // Big, busy, or steadily growing (leak watch measured it climbing).
-        if classify::is_shell(p) || !(p.memory >= 400 * MB || p.cpu >= 40.0 || p.growth.is_some()) {
-            continue;
-        }
-        let members: Vec<u32> = tree
-            .subtree(p.pid)
-            .into_iter()
-            .filter(|m| {
-                !claimed.contains(m) && !app_of.contains_key(m) && tree.by_pid[m].owned_by_user
-            })
-            .collect();
-        claimed.extend(members.iter().copied());
-        let name = p.name.split_whitespace().next().unwrap_or(&p.name);
-        let name = name
-            .strip_suffix(".exe")
-            .or_else(|| name.strip_suffix(".EXE"))
-            .unwrap_or(name)
-            .to_string();
-        groups.push(Group {
-            key: format!("process:{}", classify::base(&name)),
-            kind: Kind::Process,
-            title: name,
-            detail: p.cwd.as_deref().map(shorten_home),
-            root: p.pid,
-            members,
-            app_pid: None,
-            memory: 0,
-            cpu: 0.0,
-            idle_secs: 0,
-            idle_is_lower_bound: false,
-            orphaned: false,
-            ports: Vec::new(),
-            host_app: None,
-            host_root: None,
-            growth: None,
-        });
-    }
-
-    // Totals.
-    for g in &mut groups {
-        let mut idle = u64::MAX;
-        for m in &g.members {
-            let p = tree.by_pid[m];
-            g.memory += p.memory;
-            g.cpu += p.cpu;
-            for port in &p.ports {
-                if !g.ports.contains(port) {
-                    g.ports.push(*port);
+    /// Memory, CPU, ports, idle time and growth summed over each group's members.
+    fn add_totals(&mut self) {
+        for g in &mut self.groups {
+            let mut idle = u64::MAX;
+            for m in &g.members {
+                let p = self.tree.by_pid[m];
+                g.memory += p.memory;
+                g.cpu += p.cpu;
+                for port in &p.ports {
+                    if !g.ports.contains(port) {
+                        g.ports.push(*port);
+                    }
+                }
+                if p.idle_secs < idle {
+                    idle = p.idle_secs;
+                    g.idle_is_lower_bound = p.idle_is_lower_bound;
+                }
+                if let Some(gr) = p.growth
+                    && g.growth.is_none_or(|cur| gr.0 > cur.0)
+                {
+                    g.growth = Some(gr);
                 }
             }
-            if p.idle_secs < idle {
-                idle = p.idle_secs;
-                g.idle_is_lower_bound = p.idle_is_lower_bound;
-            }
-            if let Some(gr) = p.growth
-                && g.growth.is_none_or(|cur| gr.0 > cur.0)
-            {
-                g.growth = Some(gr);
-            }
+            g.idle_secs = if idle == u64::MAX { 0 } else { idle };
+            g.ports.sort_unstable();
         }
-        g.idle_secs = if idle == u64::MAX { 0 } else { idle };
-        g.ports.sort_unstable();
     }
-    groups
 }
 
 fn kind_slug(k: Kind) -> &'static str {
