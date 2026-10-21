@@ -7,16 +7,6 @@ import { prefersReducedMotion } from "svelte/motion";
 const MAX_LIVE = 24;
 let live = 0;
 
-/** Removes every drop at once (e.g. when the panel changes view). */
-export function clearDrops(layer: HTMLElement | undefined) {
-  if (!layer) return;
-  for (const el of [...layer.querySelectorAll(".drop")]) {
-    for (const a of el.getAnimations()) a.cancel();
-    el.remove();
-  }
-  live = 0;
-}
-
 export function dropFrom(layer: HTMLElement, from: DOMRect, to: DOMRect, onLand?: () => void, count = 6) {
   if (prefersReducedMotion.current) {
     onLand?.();

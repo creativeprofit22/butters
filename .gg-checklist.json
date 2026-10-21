@@ -35,6 +35,26 @@
         "Not checked: edited workflows not yet run on GitHub (uncommitted); actionlint/zizmor not installed; scripts and secrets jobs exist only in unpushed commits so those checks will not report until pushed"
       ]
     },
+    "code-health": {
+      "checkedAt": "2026-10-21T04:28:41.506Z",
+      "commit": "2faa0b2",
+      "uncommittedChanges": true,
+      "result": "pass",
+      "summary": "Re-check of the 6 recorded findings: 5 fixed and verified, 1 (docker_vm_memory) withdrawn because examples/docker.rs uses it.",
+      "findings": [],
+      "evidence": [
+        "docker_vm_memory: false positive; deleting it broke clippy --all-targets (examples/docker.rs:43). Restored, no diff",
+        "drops.ts clearDrops removed; no references left in src or e2e",
+        "do_scan split into sort_verdicts/proc_target/proc_suggestion/protected_cards; duplicate target code now one helper",
+        "do_scan_services split into container_cards/docker_disk_cards/model_cards",
+        "build_groups split into Grouping passes (add_apps, attach_vms, add_cli_work, add_heavy, add_totals) + helpers",
+        "App.svelte: SettingsView.svelte and ProtectedList.svelte extracted (1534 -> 1224 lines, mostly CSS)",
+        "cargo fmt --check OK; clippy -D warnings clean with/without playground; cargo test 86/86",
+        "pnpm check 0 errors/0 warnings; pnpm lint pass (68 old warnings); Playwright Chromium 57 passed, 1 skipped",
+        "Scope: re-check of the 6 findings recorded earlier today only, not a new review",
+        "Not checked: WebKit Playwright (browser not installed), macOS-only code and macos_app.py (Windows host)"
+      ]
+    },
     "commit-gate": {
       "checkedAt": "2026-10-20T18:31:12.279Z",
       "commit": "22d7641",

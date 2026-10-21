@@ -15,13 +15,14 @@
     type UpdateStatus,
   } from "./lib/api";
   import ButterGauges from "./lib/ButterGauges.svelte";
-  import Check from "./lib/Check.svelte";
   import { dropFrom } from "./lib/drops";
   import { bytes } from "./lib/format";
   import Icon from "./lib/Icon.svelte";
   import { butterEase, dissolve, melt, ms, pour } from "./lib/motion";
+  import ProtectedList from "./lib/ProtectedList.svelte";
   import Row from "./lib/Row.svelte";
   import Savings from "./lib/Savings.svelte";
+  import SettingsView from "./lib/SettingsView.svelte";
   import StatsView from "./lib/StatsView.svelte";
   import StatusPat from "./lib/StatusPat.svelte";
   import Toast from "./lib/Toast.svelte";
@@ -33,7 +34,6 @@
   let refreshing = $state(false);
   let view = $state<"main" | "settings" | "stats">("main");
   let settings = $state<Settings | null>(null);
-  let settingsError = $state<string | null>(null);
   let showProtected = $state(false);
 
   // Keyed by what a suggestion *is*, so choices survive the 15 s refresh.
@@ -375,26 +375,6 @@
     }
   }
 
-  async function openSettings() {
-    view = "settings";
-    settingsError = null;
-    try {
-      settings = await api.getSettings();
-    } catch (e) {
-      settingsError = String(e);
-    }
-  }
-
-  async function saveSettings(next: Settings) {
-    settingsError = null;
-    try {
-      settings = await api.setSettings(next);
-    } catch (e) {
-      settingsError = String(e);
-      settings = await api.getSettings().catch(() => settings);
-    }
-  }
-
   function onKey(e: KeyboardEvent) {
     if (e.key !== "Escape") return;
     if (savings) savings = null;
@@ -494,15 +474,6 @@
         ? 0.5
         : 0,
   );
-  const isMac = /Mac/.test(navigator.platform) || /Macintosh/.test(navigator.userAgent);
-  const SHORTCUTS = ["Alt+Super+B", "Control+Alt+B", "Alt+Super+Space", ""];
-  function shortcutLabel(k: string) {
-    if (!k) return "Off";
-    const mac: Record<string, string> = { Alt: "⌥", Super: "⌘", Control: "⌃", Shift: "⇧", Space: "Space" };
-    const win: Record<string, string> = { Alt: "Alt", Super: "Win", Control: "Ctrl", Shift: "Shift", Space: "Space" };
-    const parts = k.split("+").map((p) => (isMac ? mac : win)[p] ?? p);
-    return isMac ? parts.join("") : parts.join("+");
-  }
   const footState = $derived(running ? "running" : confirming ? "confirm" : selected.length ? "ready" : "idle");
 </script>
 
@@ -525,7 +496,7 @@
           <button class="ghost" type="button" aria-label="Stats" use:tip={"Stats"} onclick={() => openStats()}>
             <Icon name="chart" />
           </button>
-          <button class="ghost" type="button" aria-label="Settings" use:tip={"Settings"} onclick={openSettings}>
+          <button class="ghost" type="button" aria-label="Settings" use:tip={"Settings"} onclick={() => (view = "settings")}>
             <Icon name="settings" />
           </button>
         </div>
@@ -622,42 +593,15 @@
           {/if}
 
           {#if scan.protected.length}
-            <div class="protected">
-              <button class="disclose" type="button" aria-expanded={showProtected} onclick={() => (showProtected = !showProtected)}>
-                <span class="chev" class:open={showProtected}><Icon name="chevron" size={14} /></span>
-                Protected · {scan.protected.length}
-              </button>
-              {#if showProtected}
-                <ul in:pour={{ y: -4 }} out:dissolve={{ duration: 200 }}>
-                  {#each scan.protected.filter((x) => !gone[x.key]) as p (p.key)}
-                    <li
-                      data-key={p.key}
-                      class:closable={!!p.id}
-                      class:armed={armedKey === p.key}
-                      class:melting={!!melting[p.key]}
-                      animate:flip={{ duration: ms(620), easing: butterEase }}
-                      out:melt={{ duration: gone[p.key] ? 0 : 760, blur: 0 }}
-                    >
-                      <span class="p-title">{p.title}</span>
-                      <span class="p-reason muted">{p.reason}</span>
-                      <span class="p-end">
-                        {#if pending[p.key]}
-                          <span class="num softening" in:dissolve>…</span>
-                        {:else if armedKey === p.key}
-                          <!-- Second step: it's protected for a reason, so confirm. -->
-                          <button class="btn small danger-soft" type="button" in:dissolve={{ blur: 0 }} onclick={() => closeProtected(p)}>{p.verb}?</button>
-                        {:else}
-                          <span class="num p-mem">{bytes(p.memory)}</span>
-                          {#if p.id}
-                            <button class="btn small p-close" type="button" aria-label={`Close ${p.title}`} onclick={() => (armedKey = p.key)}>Close</button>
-                          {/if}
-                        {/if}
-                      </span>
-                    </li>
-                  {/each}
-                </ul>
-              {/if}
-            </div>
+            <ProtectedList
+              items={scan.protected}
+              bind:open={showProtected}
+              bind:armedKey
+              {gone}
+              {melting}
+              {pending}
+              onClose={closeProtected}
+            />
           {/if}
         {/if}
       </div>
@@ -699,83 +643,14 @@
   {:else if view === "stats"}
     <StatsView {smooth} tab={statsTab} onBack={() => (view = "main")} />
   {:else}
-    <section class="view" aria-label="Settings" in:dissolve={{ duration: 220, blur: 3 }} out:dissolve={{ duration: 160, blur: 3 }}>
-      <header class="head">
-        <div class="status">
-          <button class="ghost" type="button" aria-label="Back" use:tip={"Back"} onclick={() => (view = "main")}><Icon name="back" /></button>
-          <h1>Settings</h1>
-        </div>
-      </header>
-      <div class="scroll settings">
-        {#if settingsError}<p class="error" role="alert" in:pour>{settingsError}</p>{/if}
-        {#if settings}
-          {@const s = settings}
-          <div class="setting" in:pour={{ delay: 40 }}>
-            <label class="setting-text" for="set-alerts">
-              <strong>Alerts</strong>
-              <span class="muted">Low memory, heat, maxed CPU</span>
-            </label>
-            <Check id="set-alerts" variant="switch" checked={s.alerts} onchange={(on) => saveSettings({ ...s, alerts: on })} />
-          </div>
-          <div class="setting" in:pour={{ delay: 70 }}>
-            <label class="setting-text" for="set-sounds">
-              <strong>Sounds</strong>
-              <span class="muted">Soft, in sync with animations</span>
-            </label>
-            <Check id="set-sounds" variant="switch" checked={s.sounds} onchange={(on) => saveSettings({ ...s, sounds: on }).then(() => on && api.sound("tick"))} />
-          </div>
-          <div class="setting" in:pour={{ delay: 85 }}>
-            <label class="setting-text" for="set-shortcut">
-              <strong>Shortcut</strong>
-              <span class="muted">Open Butters from anywhere</span>
-            </label>
-            <select id="set-shortcut" class="select" value={s.shortcut} onchange={(e) => saveSettings({ ...s, shortcut: e.currentTarget.value })}>
-              {#each SHORTCUTS as k (k)}
-                <option value={k}>{shortcutLabel(k)}</option>
-              {/each}
-            </select>
-          </div>
-          <div class="setting" in:pour={{ delay: 100 }}>
-            <label class="setting-text" for="set-login">
-              <strong>Start at login</strong>
-              <span class="muted">Lives in the menu bar</span>
-            </label>
-            <Check id="set-login" variant="switch" checked={s.launch_at_login} onchange={(on) => saveSettings({ ...s, launch_at_login: on })} />
-          </div>
-          <div class="setting" in:pour={{ delay: 160 }}>
-            <span class="setting-text">
-              <strong>Ignored</strong>
-              <span class="muted">{s.ignored.length ? `${s.ignored.length} item${s.ignored.length === 1 ? "" : "s"}` : "None"}</span>
-            </span>
-            {#if s.ignored.length}<button class="btn" type="button" onclick={() => saveSettings({ ...s, ignored: [] })}>Clear</button>{/if}
-          </div>
-        {/if}
-        <div class="setting" in:pour={{ delay: 200 }}>
-          <span class="setting-text">
-            <strong>Updates</strong>
-            <span class="muted">
-              {#if update?.installing || updating}Updating…
-              {:else if update?.checking}Checking…
-              {:else if update?.available}{update.available} ready
-              {:else if update?.error}Couldn't check
-              {:else}Version {update?.current ?? "0.1.0"}{/if}
-            </span>
-          </span>
-          {#if update?.available}
-            <button class="btn" type="button" onclick={installUpdate} disabled={updating}>Update</button>
-          {:else}
-            <button class="btn" type="button" onclick={checkUpdate} disabled={update?.checking}>Check</button>
-          {/if}
-        </div>
-        <div class="setting" in:pour={{ delay: 240 }}>
-          <span class="setting-text">
-            <strong>Quit Butters</strong>
-          </span>
-          <button class="btn" type="button" onclick={() => api.quit()}>Quit</button>
-        </div>
-
-      </div>
-    </section>
+    <SettingsView
+      bind:settings
+      {update}
+      {updating}
+      onInstall={installUpdate}
+      onCheck={checkUpdate}
+      onBack={() => (view = "main")}
+    />
   {/if}
 
   {#if savings}
@@ -1063,10 +938,6 @@
     gap: 6px;
     padding: 0 var(--pad) 12px;
   }
-  .num {
-    color: var(--ink);
-    font-weight: 500;
-  }
   .heat {
     grid-column: 1 / -1;
     justify-self: start;
@@ -1128,24 +999,6 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-  }
-
-  .select {
-    height: 28px;
-    padding: 0 28px 0 10px;
-    border: 1px solid var(--control-line);
-    border-radius: var(--r-control);
-    background:
-      url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%236b6152' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
-        no-repeat right 10px center,
-      var(--surface);
-    color: var(--ink);
-    font: inherit;
-    font-size: 12.5px;
-    line-height: 1.25;
-    appearance: none;
-    -webkit-appearance: none;
-    cursor: pointer;
   }
 
   .scroll {
@@ -1212,131 +1065,12 @@
     }
   }
 
-  .protected {
-    padding: 12px 0 0;
-  }
-  .disclose {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    min-height: 28px;
-    padding: 4px var(--inset);
-    border: 0;
-    border-radius: var(--r-control);
-    background: transparent;
-    color: var(--muted);
-    font-size: 11.5px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: color var(--t-soft) var(--butter-ease), background-color var(--t-soft) var(--butter-ease);
-  }
-  .disclose:hover {
-    color: var(--ink);
-    background: var(--surface-soft);
-  }
-  .chev {
-    display: grid;
-    transition: transform var(--t-soft) var(--butter-ease);
-  }
-  .chev.open {
-    transform: rotate(90deg);
-  }
-  .protected ul {
-    list-style: none;
-    margin: 4px 0 0;
-    padding: 0;
-  }
-  .protected li {
-    display: grid;
-    grid-template-columns: minmax(0, auto) minmax(0, 1fr) auto;
-    align-items: center;
-    gap: 8px;
-    min-height: 32px;
-    padding: 2px var(--inset);
-    border-radius: var(--r-control);
-    font-size: 12px;
-    transition: background-color var(--t-soft) var(--butter-ease);
-  }
-  .protected li.closable:hover,
-  .protected li.closable:focus-within,
-  .protected li.armed {
-    background: var(--surface-soft);
-  }
-  /* The memory figure gives way to a Close button on hover (and on keyboard
-     focus), in the same spot, so the row never shifts. */
-  .p-end {
-    display: grid;
-    justify-items: end;
-    align-items: center;
-    min-width: 64px;
-  }
-  .p-end > * {
-    grid-area: 1 / 1;
-  }
-  /* Opacity and a small slide only: no CSS filters inside the list (WebKit
-     draws stray magenta edges on blurred elements there). */
-  .p-close {
-    opacity: 0;
-    transform: translateX(4px);
-    pointer-events: none;
-    transition:
-      opacity var(--t-quick) var(--butter-ease),
-      transform var(--t-quick) var(--butter-ease);
-  }
-  .p-mem {
-    /* Only a label: clicks always reach the Close button underneath. */
-    pointer-events: none;
-    transition:
-      opacity var(--t-quick) var(--butter-ease),
-      transform var(--t-quick) var(--butter-ease);
-  }
-  li.closable:hover .p-close,
-  .p-close:focus-visible {
-    opacity: 1;
-    transform: none;
-    pointer-events: auto;
-  }
-  li.closable:hover .p-mem,
-  li.closable:focus-within .p-mem {
-    opacity: 0;
-    transform: translateX(-4px);
-  }
-  .protected li.melting {
-    pointer-events: none;
-    transform-origin: 50% 100%;
-    animation: p-melt 1000ms cubic-bezier(0.5, 0, 0.75, 0.25) forwards;
-  }
-  @keyframes p-melt {
-    0% {
-      background: var(--surface-soft);
-    }
-    25% {
-      background: var(--butter-hi);
-      transform: scale(1.01, 1.03);
-    }
-    70% {
-      background: var(--butter);
-      opacity: 1;
-    }
-    100% {
-      background: var(--butter);
-      transform: translateY(3px) scale(1.04, 0.1);
-      opacity: 0;
-    }
-  }
-  .p-title,
-  .p-reason,
   .bar-text,
-  .setting-text > *,
   .toast,
   .heat {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-  }
-  .p-title {
-    font-weight: 600;
-    max-width: 170px;
   }
 
   .bar {
@@ -1455,51 +1189,11 @@
     height: 28px;
     padding: 0 12px;
   }
-  .btn.small.p-close,
-  .btn.small.danger-soft {
-    height: 26px;
-    padding: 0 10px;
-    font-size: 12px;
-  }
-  .btn.danger-soft {
-    background: var(--surface);
-    border-color: var(--danger);
-    color: var(--danger);
-    font-weight: 600;
-  }
   .btn.primary-soft {
     background: var(--surface);
     border-color: var(--butter-edge);
     color: var(--ink);
     font-weight: 600;
-  }
-  .settings {
-    padding-top: 4px;
-  }
-  .setting {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--gap);
-    padding: 12px var(--inset);
-    border-radius: var(--r-pat);
-  }
-  .setting-text {
-    display: flex;
-    flex-direction: column;
-    gap: 1px;
-    min-width: 0;
-  }
-  label.setting-text {
-    cursor: pointer;
-  }
-  .setting-text strong {
-    font-weight: 600;
-    font-size: 13px;
-  }
-  .error {
-    margin: 8px var(--inset);
-    color: var(--danger);
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -1519,13 +1213,9 @@
     }
     .ghost:active:not(:disabled),
     .btn:active,
-    .chev.open,
     .spinning {
       transform: none;
       animation: none;
-    }
-    .chev.open {
-      transform: rotate(90deg);
     }
     .pat {
       animation: none;
