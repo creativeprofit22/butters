@@ -80,11 +80,7 @@ impl History {
     }
 
     pub fn load(path: &Path) -> History {
-        let mut h = std::fs::read(path)
-            .ok()
-            .filter(|b| b.len() < 256 * 1024)
-            .and_then(|b| serde_json::from_slice::<History>(&b).ok())
-            .unwrap_or_default();
+        let mut h = crate::json_file::read::<History>(path, 256 * 1024).unwrap_or_default();
         h.adopt_days(now_secs());
         h
     }
@@ -257,6 +253,11 @@ mod tests {
         std::fs::write(&path, b"nope").unwrap();
         let fresh = History::load(&path);
         assert!(fresh.days.is_empty() && fresh.lifetime.freed == 0 && fresh.lifetime.since > 0);
+        // The bad file is kept aside, not overwritten by the next save.
+        assert_eq!(
+            std::fs::read(dir.join("history.json.bad")).unwrap(),
+            b"nope"
+        );
         let _ = std::fs::remove_dir_all(dir);
     }
 

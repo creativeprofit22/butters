@@ -46,11 +46,7 @@ impl Activity {
     }
 
     pub fn load(path: &Path) -> Activity {
-        std::fs::read(path)
-            .ok()
-            .filter(|b| b.len() < 512 * 1024)
-            .and_then(|b| serde_json::from_slice(&b).ok())
-            .unwrap_or_default()
+        crate::json_file::read(path, 512 * 1024).unwrap_or_default()
     }
 
     pub fn save(&self, path: &Path) -> std::io::Result<()> {

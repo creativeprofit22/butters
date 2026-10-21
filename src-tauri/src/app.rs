@@ -574,7 +574,10 @@ fn observe_docker(state: &AppState, containers: Option<&[services::Container]>) 
         Some(cs) => {
             let mut act = lock(&state.docker_activity);
             act.observe(cs, now);
-            let _ = act.save(&state.docker_activity_path);
+            crate::json_file::log_save(
+                &state.docker_activity_path,
+                act.save(&state.docker_activity_path),
+            );
             let all_idle = !cs.is_empty()
                 && cs
                     .iter()
@@ -995,7 +998,7 @@ fn close_target(state: &AppState, id: &str, force: bool) -> Outcome {
             let Some(kind) = target.memory_kind() else {
                 let mut h = lock(&state.history);
                 h.record_disk(*disk);
-                let _ = h.save(&state.history_path);
+                crate::json_file::log_save(&state.history_path, h.save(&state.history_path));
                 return outcome;
             };
             let kind = serde_json::to_value(kind)
@@ -1004,7 +1007,7 @@ fn close_target(state: &AppState, id: &str, force: bool) -> Outcome {
                 .unwrap_or_default();
             let mut h = lock(&state.history);
             h.record_freed(history::today(), *freed, &kind);
-            let _ = h.save(&state.history_path);
+            crate::json_file::log_save(&state.history_path, h.save(&state.history_path));
         }
         outcome
     }
@@ -1032,19 +1035,22 @@ pub fn get_settings(state: State<'_, AppState>) -> Settings {
 }
 
 /// Swaps the registered global shortcut from `old` to the current setting.
-/// Failing to register (another app owns the keys) is not fatal.
-pub fn apply_shortcut(app: &AppHandle, old: &str) {
+/// Failing to register (another app owns the keys) is not fatal; the error
+/// says so in words the settings view can show.
+pub fn apply_shortcut(app: &AppHandle, old: &str) -> Result<(), String> {
     use tauri_plugin_global_shortcut::GlobalShortcutExt;
     let gs = app.global_shortcut();
     if !old.is_empty() {
         let _ = gs.unregister(old);
     }
     let new = lock(&app.state::<AppState>().settings).shortcut.clone();
-    if !new.is_empty()
-        && let Err(e) = gs.register(new.as_str())
-    {
-        eprintln!("shortcut {new} unavailable: {e}");
+    if new.is_empty() {
+        return Ok(());
     }
+    gs.register(new.as_str()).map_err(|e| {
+        eprintln!("shortcut {new} unavailable: {e}");
+        format!("Saved, but the shortcut {new} isn't available (another app may use it).")
+    })
 }
 
 #[tauri::command]
@@ -1067,13 +1073,14 @@ pub fn set_settings(
     }
     let (saved, old_shortcut) = {
         let mut s = lock(&state.settings);
-        let old = std::mem::replace(&mut *s, new);
-        s.save(&state.settings_path)
+        // Save first: a failed save must not leave unsaved values in use.
+        new.save(&state.settings_path)
             .map_err(|e| format!("Couldn't save settings: {e}"))?;
+        let old = std::mem::replace(&mut *s, new);
         (s.clone(), old.shortcut)
     };
     if saved.shortcut != old_shortcut {
-        apply_shortcut(&app, &old_shortcut);
+        apply_shortcut(&app, &old_shortcut)?;
     }
     Ok(saved)
 }
@@ -1112,7 +1119,10 @@ pub fn hide_panel(app: AppHandle) {
 #[tauri::command]
 pub fn quit_butters(app: AppHandle) {
     let state = app.state::<AppState>();
-    let _ = lock(&state.history).save(&state.history_path);
+    crate::json_file::log_save(
+        &state.history_path,
+        lock(&state.history).save(&state.history_path),
+    );
     app.exit(0);
 }
 
@@ -1187,7 +1197,10 @@ pub fn spawn_background(app: AppHandle) {
                     h.record_level(history::today(), level);
                     // Write at most every ~10 minutes; closes save right away.
                     if tick.is_multiple_of(200) {
-                        let _ = h.save(&state.history_path);
+                        crate::json_file::log_save(
+                            &state.history_path,
+                            h.save(&state.history_path),
+                        );
                     }
                 }
                 let alert = lock(&state.alerts).check(&stats, Instant::now());

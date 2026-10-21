@@ -4,6 +4,7 @@ pub mod app;
 pub mod docker_activity;
 pub mod engine;
 pub mod history;
+pub mod json_file;
 pub mod panel;
 pub mod permissions;
 pub mod platform;
@@ -54,7 +55,8 @@ pub fn run() {
             permissions::setup(app.handle());
             // The Playground leaves the global shortcut to the real Butters.
             #[cfg(not(feature = "playground"))]
-            app::apply_shortcut(app.handle(), "");
+            // Already logged; the settings view reports it when it's changed.
+            let _ = app::apply_shortcut(app.handle(), "");
             app::spawn_background(app.handle().clone());
             // The Playground never updates itself or touches real processes;
             // it starts its own set of test processes instead.

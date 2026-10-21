@@ -39,10 +39,7 @@ impl Settings {
     }
 
     pub fn load(path: &Path) -> Settings {
-        std::fs::read(path)
-            .ok()
-            .filter(|b| b.len() < 1024 * 1024)
-            .and_then(|b| serde_json::from_slice::<Settings>(&b).ok())
+        crate::json_file::read::<Settings>(path, 1024 * 1024)
             .map(Settings::sanitized)
             .unwrap_or_default()
     }
