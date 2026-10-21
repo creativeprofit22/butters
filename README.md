@@ -73,7 +73,7 @@ Want to see Butters close things without touching your own work? Build **Butters
 
 ## Build it yourself
 
-With Rust, Node.js, pnpm and the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) installed:
+With Rust 1.90+, Node.js 22.12+ (CI uses 24), pnpm 10 and the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) installed:
 
 ```bash
 git clone https://github.com/KenKaiii/butters.git
@@ -86,6 +86,10 @@ pnpm playground         # build Butters Playground (macOS only)
 A release build (`pnpm tauri build`) also needs `TAURI_SIGNING_PRIVATE_KEY` set, because it signs the update files.
 
 Tests: `cd src-tauri && cargo test` for the rules and safety checks, `pnpm test:e2e` for the panel (run `pnpm exec playwright install webkit chromium` once first). How it looks and moves is in [DESIGN.md](DESIGN.md). MIT licensed, so you can build on it.
+
+## Releasing
+
+Changes are listed in [CHANGELOG.md](CHANGELOG.md). To release, rename its `Unreleased` section to `## [X.Y.Z] - YYYY-MM-DD`, commit, then run `scripts/release.sh X.Y.Z` on an up-to-date `main`. It bumps the version everywhere, tags `vX.Y.Z` and pushes; GitHub Actions runs CI, builds, signs and notarizes, and publishes the release with that changelog section as its notes.
 
 ## Learn with me
 

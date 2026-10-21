@@ -14,6 +14,19 @@ if [[ -n "$(git status --porcelain)" ]]; then
   echo "Commit or stash your changes first." >&2
   exit 1
 fi
+if [[ "$(git rev-parse --abbrev-ref HEAD)" != "main" ]]; then
+  echo "Release from main." >&2
+  exit 1
+fi
+git fetch --quiet origin main
+if [[ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]]; then
+  echo "main is not in sync with origin/main. Pull or push first." >&2
+  exit 1
+fi
+if ! grep -qF "## [$version]" CHANGELOG.md; then
+  echo "Add a '## [$version] - YYYY-MM-DD' section to CHANGELOG.md first." >&2
+  exit 1
+fi
 
 python3 - "$version" <<'PY'
 import json, re, sys

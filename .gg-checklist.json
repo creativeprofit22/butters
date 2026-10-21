@@ -15,6 +15,23 @@
         "Not checked: did not run builds, release.sh, Playwright or the macOS real-app test"
       ]
     },
+    "build-release": {
+      "checkedAt": "2026-10-21T16:52:56.862Z",
+      "commit": "0594445",
+      "uncommittedChanges": true,
+      "result": "pass",
+      "summary": "Re-check of the 4 recorded findings: all fixed (changelog + notes from it, release branch/sync/changelog guard, tool versions and release steps documented). Workflow change not yet run on GitHub.",
+      "findings": [],
+      "evidence": [
+        "Added CHANGELOG.md: Unreleased + 0.1.0-0.1.13 from git log per tag (fetched upstream v0.1.13 tag)",
+        "release.yml: notes step fails if version has no CHANGELOG section; releaseBody uses its output",
+        "Simulated notes extraction: v0.1.12 and v0.1.0 ok, v9.9.9 fails as intended; release.yml yaml.safe_load ok",
+        "release.sh: refuses unless on main, HEAD == origin/main after fetch, and CHANGELOG has the version; shellcheck clean",
+        "README: Rust 1.90+, Node 22.12+, pnpm 10 + Releasing section; package.json engines.node >=22.12.0; pnpm lint exit 0",
+        "Scope: re-check of the 4 findings recorded earlier today only",
+        "Not checked: release.yml not run on GitHub (uncommitted); release.sh guards not run end to end (it pushes)"
+      ]
+    },
     "ci": {
       "checkedAt": "2026-10-20T18:25:29.248Z",
       "commit": "4f25691",
