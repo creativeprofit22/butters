@@ -1,0 +1,382 @@
+{
+  "schema": 1,
+  "kitVersion": "1.0.0",
+  "digest": "b4300cc7bcd8a340f69f50e37bb716c6e779fa83bd27543533d2793334b69bb5",
+  "files": [
+    {
+      "path": "cli.mjs",
+      "sha256": "a925747bb8ec61364b68c7488a4f44161f987149a43542d4012d01dd2b8673f7",
+      "bytes": 14304
+    },
+    {
+      "path": "glossary.json",
+      "sha256": "6f7666cf540a264be716e4e016d1faeb85cf577212aa5b245c66a92ac02816a2",
+      "bytes": 13567
+    },
+    {
+      "path": "lib/adapters/agent.mjs",
+      "sha256": "adc4f48c4ee6d70add1549cb0ddddb657db20576f3d14681a81ff9f2b7a2d350",
+      "bytes": 16699
+    },
+    {
+      "path": "lib/adapters/cli.mjs",
+      "sha256": "f748f5e8711e3855f5cad7c58b0e540c6f52dafda859bdfab74304a04d97a314",
+      "bytes": 7816
+    },
+    {
+      "path": "lib/adapters/common.mjs",
+      "sha256": "d14086d9f1455a3c791feb974bbb7b0c7796102bf41117f054c3e3bb4bc1191c",
+      "bytes": 3467
+    },
+    {
+      "path": "lib/adapters/function.mjs",
+      "sha256": "ed042abfa287be3925372ac4b1cde957012ad8fba13fb8e4f1641b0e7f5bacc1",
+      "bytes": 5650
+    },
+    {
+      "path": "lib/adapters/http.mjs",
+      "sha256": "9a0f7f02506177b2615a3033bd81902c943c535ee96cf09000f2c7a4e2b2ec22",
+      "bytes": 5245
+    },
+    {
+      "path": "lib/adapters/index.mjs",
+      "sha256": "00355a35de48d1fe6925e2968afa37eca46e159ca2f785a2ee034b17d19f6e18",
+      "bytes": 4149
+    },
+    {
+      "path": "lib/adapters/manual.mjs",
+      "sha256": "effb6dc71d8c59a29e0e4599cb5a335f3494c9149a74eb4e9e095986b39e4d43",
+      "bytes": 6716
+    },
+    {
+      "path": "lib/argv.mjs",
+      "sha256": "176d2855d09457c14d8bdfa91f11ac51034359dcf617fd031753ca7bea084017",
+      "bytes": 3270
+    },
+    {
+      "path": "lib/budget.mjs",
+      "sha256": "f6d5485cfd6dfa42e0573a38a2256a949950081d088ed941fd4aaff40f8cb7be",
+      "bytes": 9587
+    },
+    {
+      "path": "lib/check-results.mjs",
+      "sha256": "e9ca51b9b0343028453c3f4ce49720355ad12b7537a335c7a0acf684dee40a0d",
+      "bytes": 5959
+    },
+    {
+      "path": "lib/compare.mjs",
+      "sha256": "a7fc93523d0b0ff10c11427c2dec56ebffdcc591bd8d2bec96cd7484d5d24cfa",
+      "bytes": 11341
+    },
+    {
+      "path": "lib/cost.mjs",
+      "sha256": "d6623d077acd07d556bfd0b6b9c082b7c298aa8d60986aec81ceea971b331d65",
+      "bytes": 4707
+    },
+    {
+      "path": "lib/explain.mjs",
+      "sha256": "8079bbfbb4714182913aada05b14f1e211ca2b6513de4bdd1aca4d49bb18ab37",
+      "bytes": 32614
+    },
+    {
+      "path": "lib/files.mjs",
+      "sha256": "6bb5605b244ee763ebd68e7ff63c6125664330fd5510e9e12d9630fee2edce2e",
+      "bytes": 2346
+    },
+    {
+      "path": "lib/gates/command.mjs",
+      "sha256": "aad2b620f65e358daee9f9ca5ef80eee87924cfaa441aaaca8966a369c2065fd",
+      "bytes": 2209
+    },
+    {
+      "path": "lib/gates/common.mjs",
+      "sha256": "d2f76b1a17444e4e125b1fd8acc95e9429e96fed4cd052b3b0d4f56c8fb5de05",
+      "bytes": 6673
+    },
+    {
+      "path": "lib/gates/equals.mjs",
+      "sha256": "92d813f941253ff2e7be96aa1b4eca7c40a25241487378bd77e56113da02a057",
+      "bytes": 4145
+    },
+    {
+      "path": "lib/gates/exit-code.mjs",
+      "sha256": "3eceba4eb770d2eab3cebcc2d97bc15d99a6e090b4abced735598b23de67beb5",
+      "bytes": 1338
+    },
+    {
+      "path": "lib/gates/honesty.mjs",
+      "sha256": "f74793cf419b5654986f9e4e8610778332ab5602dcfa3d95cd837f3bef35a2a4",
+      "bytes": 4269
+    },
+    {
+      "path": "lib/gates/index.mjs",
+      "sha256": "5d0f4bfdb005470415531f7de1ae237922ee3c99b2429decf88df9126cd8d88b",
+      "bytes": 8010
+    },
+    {
+      "path": "lib/gates/quality.mjs",
+      "sha256": "7f1a3f21a9aa9c97a124c820f8d5c678c7b163b4d8faf9508210300b3f132041",
+      "bytes": 5143
+    },
+    {
+      "path": "lib/gates/schema.mjs",
+      "sha256": "b9e118fdac70c85bccf0e9266d9336b407c0893f80fdc0c4ba9d3bea93eff1f0",
+      "bytes": 7684
+    },
+    {
+      "path": "lib/gates/scope.mjs",
+      "sha256": "3ca8c7a52db67cbfd58c74ea5b135a912f6fa756cfb3934226a1eef1d2810c0b",
+      "bytes": 2112
+    },
+    {
+      "path": "lib/gates/side-effects.mjs",
+      "sha256": "6dfe46f36e81732cd888744de22a9168566d6c90f4023e6abf0d50f7da5cd9d5",
+      "bytes": 3886
+    },
+    {
+      "path": "lib/gates/tests.mjs",
+      "sha256": "bb6633026d6038bef17c0222a38773fb37a864922826af217e889d0790acadb2",
+      "bytes": 7517
+    },
+    {
+      "path": "lib/gates/tolerance.mjs",
+      "sha256": "7024aa56d9073762b2d107831c822ebf65a3f109c6c4211ade2bfc07fddcc223",
+      "bytes": 4987
+    },
+    {
+      "path": "lib/ledger.mjs",
+      "sha256": "db1719e7fcabdc43c05558eeedd7a00fe53be0f556eb84cedfa1d3a0f11b81cb",
+      "bytes": 6338
+    },
+    {
+      "path": "lib/measure.mjs",
+      "sha256": "91cb45ec9032256bb034d67f010e44b28388a98e17e0d6914c0762f3ee21b254",
+      "bytes": 3353
+    },
+    {
+      "path": "lib/metrics/common.mjs",
+      "sha256": "5a7bee6a772da6ad1ffa3447ae15927610e31133e4b0a4970fdc603cf416adfb",
+      "bytes": 2359
+    },
+    {
+      "path": "lib/metrics/cpu-time.mjs",
+      "sha256": "fb40681002b652b6550a3da707d67a4301fb68008c7a26885fc8708976beb7cb",
+      "bytes": 734
+    },
+    {
+      "path": "lib/metrics/custom.mjs",
+      "sha256": "a70fae7a2f37fafed11822fc704da6589159750822e26ceb361a3a2e6fd354fa",
+      "bytes": 3451
+    },
+    {
+      "path": "lib/metrics/index.mjs",
+      "sha256": "67fad7d64dabd0c6a9ab34d922cea27a4b4a3e4c24f0e9ad40688bc2f5b8c204",
+      "bytes": 3633
+    },
+    {
+      "path": "lib/metrics/output-size.mjs",
+      "sha256": "751e19928df764041994d01e1f9718ae5f5c47ef6fa7f5b3845bfc58e265bf63",
+      "bytes": 600
+    },
+    {
+      "path": "lib/metrics/peak-memory.mjs",
+      "sha256": "f13f09626a9aec5a0af9d43b02d49b909c1a4ae9568a8f3a692175384360b9d7",
+      "bytes": 843
+    },
+    {
+      "path": "lib/metrics/rating.mjs",
+      "sha256": "9192428c0c730185e941a28d1c37b7de8dfd32ac1e360eb59563a3ae99b25470",
+      "bytes": 933
+    },
+    {
+      "path": "lib/metrics/tokens-cost.mjs",
+      "sha256": "e8aec2577ad88b7bc57acc7c7c879afc66cc434ffbf8112f9c9a690a5c2ba28f",
+      "bytes": 3721
+    },
+    {
+      "path": "lib/metrics/wall-time.mjs",
+      "sha256": "b9400559da9cba98ad5b0e3032f988bc3971b1ab9b96e695d6c298574e5c3679",
+      "bytes": 1065
+    },
+    {
+      "path": "lib/pipeline.mjs",
+      "sha256": "687021ae6fe6ddfa93fed5009a1ba5eb56c5b2672108b507a8655e59a22b9924",
+      "bytes": 38279
+    },
+    {
+      "path": "lib/protocol.mjs",
+      "sha256": "652bc8ded91a75e3f689bdb104f5559826198772b941eaa0759a3df8c909f1d3",
+      "bytes": 13365
+    },
+    {
+      "path": "lib/provenance.mjs",
+      "sha256": "b2b20715d126924a150bd113e690485add0481c550cf742ab728e164086f6066",
+      "bytes": 9942
+    },
+    {
+      "path": "lib/rating.mjs",
+      "sha256": "9b45b8c2789aa0a6877cac3b7d19639cfe84ffb8fbbcbea79ac220187310ac02",
+      "bytes": 12397
+    },
+    {
+      "path": "lib/report.mjs",
+      "sha256": "4ab950eb8589b377be7fc6caa881059efe7d53e484527778216a474c702d1f15",
+      "bytes": 9180
+    },
+    {
+      "path": "lib/result.mjs",
+      "sha256": "e207840ad7f8ca176170d6b0e20cf30a0aed18de14332f265ed1c70f70ebbc03",
+      "bytes": 1261
+    },
+    {
+      "path": "lib/rng.mjs",
+      "sha256": "c2824c8c56520376bb0577f8f798672f87d87805cb687ee9f50d92769dc5dead",
+      "bytes": 1471
+    },
+    {
+      "path": "lib/runner.mjs",
+      "sha256": "7beb4514ca8d1d21db3e493d3dab9521e512db3211af31c7cfe4676837a212c4",
+      "bytes": 14175
+    },
+    {
+      "path": "lib/sample-io.mjs",
+      "sha256": "137c7a7946dff529ed793960991201da98e16657799b7d30b918ccd4add99af4",
+      "bytes": 4621
+    },
+    {
+      "path": "lib/sampler.mjs",
+      "sha256": "ff74bb4e25bbc327868e98029b59f5805d266d96467574e32dd7fa721cc13ad1",
+      "bytes": 5776
+    },
+    {
+      "path": "lib/sandbox/docker.mjs",
+      "sha256": "691b699c553ec40b69ee5f7d04f5b799a3c0117b1c2f36e9699adf4d28d36a2d",
+      "bytes": 3334
+    },
+    {
+      "path": "lib/sandbox/process.mjs",
+      "sha256": "7b9225a9385638318a58a8cd45527e8e727ba405ef0d702a7dab7d7e99d1411b",
+      "bytes": 9294
+    },
+    {
+      "path": "lib/schedule.mjs",
+      "sha256": "e1c2ae6dbbb6ed69eed283b481fcf6af4e9eca3a4ed8b371e3452e060d8787b8",
+      "bytes": 2020
+    },
+    {
+      "path": "lib/selftest.mjs",
+      "sha256": "da5f43ccdb68262a16c91c1ee4d6034a4eff0626fe49abd6e2ba67fb562b4aa2",
+      "bytes": 10403
+    },
+    {
+      "path": "lib/stats.mjs",
+      "sha256": "648706419df9a0c492604a855c72c6b1c33c92968e8d7bd5e7d3d70a1695e574",
+      "bytes": 18885
+    },
+    {
+      "path": "lib/study.mjs",
+      "sha256": "4aefc21c6d89c03672448a864c0294a8f42fc04824ae3da0a6c6d2d73778f785",
+      "bytes": 17688
+    },
+    {
+      "path": "lib/task.mjs",
+      "sha256": "6fb73e175019078dd88e7ef5ddfc168dc27ccebdd8ab82142b61c52d8a9c2eb7",
+      "bytes": 10189
+    },
+    {
+      "path": "lib/transcript.mjs",
+      "sha256": "ad97e554984a2efb401a20efa5d23a215911f122fa264cc216067f8f8846ed44",
+      "bytes": 10728
+    },
+    {
+      "path": "lib/version.mjs",
+      "sha256": "62bf72a7bbc173e3682968bfcb5fc59be4e72a2fd89e7243a2ca2aa01ad1ef64",
+      "bytes": 263
+    },
+    {
+      "path": "lib/worker.mjs",
+      "sha256": "67e9fa02eb6356bc3f1f2d17028805274d6b8b210b85212e4032768007a735a0",
+      "bytes": 3378
+    },
+    {
+      "path": "playbooks/agent-studies.md",
+      "sha256": "9337b1fe19832d6b0659693006e3f271d68a6243667b45ad5e9db01e808accf1",
+      "bytes": 4701
+    },
+    {
+      "path": "playbooks/explain.md",
+      "sha256": "eff90c5c2f1e94feb72ca49f3e9fbba5002ae8da272d1a7be26fb738957024af",
+      "bytes": 1242
+    },
+    {
+      "path": "playbooks/new-study.md",
+      "sha256": "e879e7c0a8944b7ad538c6e015003eb50a501219cf7c4b3a3940d7384bf18689",
+      "bytes": 4755
+    },
+    {
+      "path": "playbooks/rate.md",
+      "sha256": "82849fc724f2d4195ec307d5fceb25d152ddab1e136e5d43071ac122dae99325",
+      "bytes": 1585
+    },
+    {
+      "path": "playbooks/report.md",
+      "sha256": "2e67246d01350c51e3a4650ae89d2dac9d27618a8a1fef558c9a26cfc288cff0",
+      "bytes": 2320
+    },
+    {
+      "path": "playbooks/run.md",
+      "sha256": "ac16f1bfa17a0dda674690abb36ec0f5856273038fbf2a47a4de8e4c77177624",
+      "bytes": 3383
+    },
+    {
+      "path": "templates/bench.config.sample.json",
+      "sha256": "e7e94e1002bbc77515159800391f374471e89415cc8f3a12402f2a9505fc9b53",
+      "bytes": 858
+    },
+    {
+      "path": "templates/bench.md",
+      "sha256": "30ac55b235831297440985c9ec50a169c89bb2330682e701f45f103581cbc488",
+      "bytes": 3528
+    },
+    {
+      "path": "templates/study.sample.json",
+      "sha256": "6b319cbaab91b51e3f107ba62ea4d1c06221d4c58076756a21b44506b762b5df",
+      "bytes": 3643
+    },
+    {
+      "path": "templates/task.sample/files/README.md",
+      "sha256": "2b9bfd74a1b3d8fb457069a5fa972344c021ae155deb4bf83aa90061940816bf",
+      "bytes": 55
+    },
+    {
+      "path": "templates/task.sample/files/config/keep.json",
+      "sha256": "c798d73f1bc0a91e885de4316ec6741edf622e298430e7b9ce58bed65889422d",
+      "bytes": 17
+    },
+    {
+      "path": "templates/task.sample/files/src/add.mjs",
+      "sha256": "c0c61bc7caf98bb9bafcf7265096b1a2dba6b33e0bd86d0291e63dbf0a45f31a",
+      "bytes": 67
+    },
+    {
+      "path": "templates/task.sample/files/src/sub.mjs",
+      "sha256": "86d36a0b150c343028bd09a1af334c42a2f3d28cc35cffea532b3c52b76f9b88",
+      "bytes": 59
+    },
+    {
+      "path": "templates/task.sample/instruction.md",
+      "sha256": "2f39d60695faa506ef784c241038fc6adb708ff27ae22b5bbb4f5d6c7960953e",
+      "bytes": 261
+    },
+    {
+      "path": "templates/task.sample/oracle/add.check.mjs",
+      "sha256": "ac181a1a438ff310bad173bbfd574b006e4a604bb093eb0905237107f70f138e",
+      "bytes": 507
+    },
+    {
+      "path": "templates/task.sample/task.json",
+      "sha256": "7bda8ddc62e8bde9ca208de7656c4baebbe9cca8ad342f416d66f26bc7fd494e",
+      "bytes": 421
+    }
+  ]
+}
