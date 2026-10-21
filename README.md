@@ -65,23 +65,31 @@ Butters lives in your menu bar and keeps a busy dev machine running smooth. A da
 
 The only permission it asks for is notifications, for alerts. One click turns them on.
 
+Something went wrong? Butters keeps a local log (nothing is sent anywhere): `~/Library/Logs/com.kenkai.butters/butters.log` on macOS, `%LOCALAPPDATA%\com.kenkai.butters\logs\butters.log` on Windows. Attach it to a [bug report](https://github.com/KenKaiii/butters/issues/new).
+
 ## Try it safely
 
-Want to see Butters close things without touching your own work? Build **Butters Playground** from source (`pnpm playground`, see below). It's a separate test app that starts seven throwaway processes (dev servers, an agent session, an MCP server, a busy build and a leaking process) and can only see those. Close them as often as you like, then hit **Reset**. Your real apps are invisible to it. It isn't part of the download.
+Want to see Butters close things without touching your own work? Build **Butters Playground** from source (`pnpm playground`, macOS only, see below). It's a separate test app that starts seven throwaway processes (dev servers, an agent session, an MCP server, a busy build and a leaking process) and can only see those. Close them as often as you like, then hit **Reset**. Your real apps are invisible to it. It isn't part of the download.
 
 ## Build it yourself
 
-With Rust, Node.js, pnpm and the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) installed:
+With Rust 1.90+, Node.js 22.12+ (CI uses 24), pnpm 10 and the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) installed:
 
 ```bash
 git clone https://github.com/KenKaiii/butters.git
 cd butters
 pnpm install
 pnpm tauri dev          # run it
-pnpm playground         # build Butters Playground
+pnpm playground         # build Butters Playground (macOS only)
 ```
 
-Tests: `cd src-tauri && cargo test` for the rules and safety checks, `pnpm test:e2e` for the panel. How it looks and moves is in [DESIGN.md](DESIGN.md). MIT licensed, so you can build on it.
+A release build (`pnpm tauri build`) also needs `TAURI_SIGNING_PRIVATE_KEY` set, because it signs the update files.
+
+Tests: `cd src-tauri && cargo test` for the rules and safety checks, `pnpm test:e2e` for the panel (run `pnpm exec playwright install webkit chromium` once first). How it looks and moves is in [DESIGN.md](DESIGN.md). MIT licensed, so you can build on it.
+
+## Releasing
+
+Changes are listed in [CHANGELOG.md](CHANGELOG.md). To release, rename its `Unreleased` section to `## [X.Y.Z] - YYYY-MM-DD`, commit, then run `scripts/release.sh X.Y.Z` on an up-to-date `main`. It bumps the version everywhere, tags `vX.Y.Z` and pushes; GitHub Actions runs CI, builds, signs and notarizes, and publishes the release with that changelog section as its notes.
 
 ## Learn with me
 

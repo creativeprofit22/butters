@@ -1,6 +1,6 @@
 // Docker deep dive, leak watch, fan culprits, end-of-day sweep, global shortcut.
-import { expect, test, type Page } from "@playwright/test";
-import { installFakeBackend, type FakeState } from "./backend";
+import { expect, type Page, test } from "@playwright/test";
+import { type FakeState, installFakeBackend } from "./backend";
 
 const MB = 1024 ** 2;
 const GB = 1024 ** 3;
@@ -13,14 +13,29 @@ async function open(page: Page, init: Record<string, unknown> = {}) {
 const fake = (page: Page) => page.evaluate(() => (window as any).__fake as FakeState);
 
 const container = (id: string, name: string, reason: string, recommended: boolean, memory = 300 * MB) => ({
-  id, key: `docker:${name}`, kind: "docker_container", title: `Container: ${name}`, detail: "postgres:16 · shop",
-  reason, note: null, memory, cpu: 0, ports: [], recommended, polite: true, verb: "Stop", disk: 0,
+  id,
+  key: `docker:${name}`,
+  kind: "docker_container",
+  title: `Container: ${name}`,
+  detail: "postgres:16 · shop",
+  reason,
+  note: null,
+  memory,
+  cpu: 0,
+  ports: [],
+  recommended,
+  polite: true,
+  verb: "Stop",
+  disk: 0,
 });
 
 test.describe("docker deep dive", () => {
   test("idle containers say how long since any activity; a day+ is pre-ticked", async ({ page }) => {
     await open(page, {
-      services: [container("d1", "shop-db", "No activity 6 d", true), container("d2", "shop-cache", "No activity 2 h+", false, 80 * MB)],
+      services: [
+        container("d1", "shop-db", "No activity 6 d", true),
+        container("d2", "shop-cache", "No activity 2 h+", false, 80 * MB),
+      ],
     });
     const db = page.locator(".row", { hasText: "Container: shop-db" });
     await expect(db).toContainText("No activity 6 d");
@@ -31,11 +46,24 @@ test.describe("docker deep dive", () => {
 
   test("docker disk clean-ups show disk, not memory, and add to lifetime disk", async ({ page }) => {
     await open(page, {
-      services: [{
-        id: "k1", key: "docker:build-cache", kind: "docker_disk", title: "Docker build cache", detail: null,
-        reason: "Over 3 days old, rebuilds if needed", note: null, memory: 0, cpu: 0, ports: [], recommended: false,
-        polite: true, verb: "Clear", disk: 12 * GB,
-      }],
+      services: [
+        {
+          id: "k1",
+          key: "docker:build-cache",
+          kind: "docker_disk",
+          title: "Docker build cache",
+          detail: null,
+          reason: "Over 3 days old, rebuilds if needed",
+          note: null,
+          memory: 0,
+          cpu: 0,
+          ports: [],
+          recommended: false,
+          polite: true,
+          verb: "Clear",
+          disk: 12 * GB,
+        },
+      ],
     });
     const row = page.locator(".row", { hasText: "Docker build cache" });
     await expect(row.locator(".mem")).toHaveText("12.0 GB disk");
@@ -43,17 +71,32 @@ test.describe("docker deep dive", () => {
     await page.getByRole("checkbox", { name: /Docker build cache/ }).check();
     await page.getByRole("button", { name: "Close 3" }).click();
     await page.getByRole("button", { name: "Close", exact: true }).click();
-    await expect.poll(async () => (await fake(page)).calls.filter((c) => c.cmd === "close_item").map((c) => (c.args as any).id)).toContain("k1");
+    await expect
+      .poll(async () => (await fake(page)).calls.filter((c) => c.cmd === "close_item").map((c) => (c.args as any).id))
+      .toContain("k1");
   });
 });
 
 test("old image versions: one row, shows disk and which images", async ({ page }) => {
   await open(page, {
-    services: [{
-      id: "k3", key: "docker:old-images", kind: "docker_disk", title: "Old image versions ×14",
-      detail: "postgres:15.8.1.099, postgres:17.6.1.127, storage-api:v1.54.0", reason: "Newer version kept, none in use",
-      note: null, memory: 0, cpu: 0, ports: [], recommended: false, polite: true, verb: "Clear", disk: 14.02e9,
-    }],
+    services: [
+      {
+        id: "k3",
+        key: "docker:old-images",
+        kind: "docker_disk",
+        title: "Old image versions ×14",
+        detail: "postgres:15.8.1.099, postgres:17.6.1.127, storage-api:v1.54.0",
+        reason: "Newer version kept, none in use",
+        note: null,
+        memory: 0,
+        cpu: 0,
+        ports: [],
+        recommended: false,
+        polite: true,
+        verb: "Clear",
+        disk: 14.02e9,
+      },
+    ],
   });
   const row = page.locator(".row", { hasText: "Old image versions ×14" });
   await expect(row).toContainText("Newer version kept, none in use");
@@ -63,10 +106,24 @@ test("old image versions: one row, shows disk and which images", async ({ page }
 
 test("leak watch: a steadily growing process says how much it grew", async ({ page }) => {
   await open(page, {
-    suggestions: [{
-      id: "L", key: "proc:node#9", kind: "process", title: "node", detail: "~/app/build.js", reason: "Grew 2.1 GB in 40 min",
-      note: null, memory: 3.4 * GB, cpu: 3, ports: [], recommended: false, polite: true, verb: "Stop", disk: 0,
-    }],
+    suggestions: [
+      {
+        id: "L",
+        key: "proc:node#9",
+        kind: "process",
+        title: "node",
+        detail: "~/app/build.js",
+        reason: "Grew 2.1 GB in 40 min",
+        note: null,
+        memory: 3.4 * GB,
+        cpu: 3,
+        ports: [],
+        recommended: false,
+        polite: true,
+        verb: "Stop",
+        disk: 0,
+      },
+    ],
   });
   const row = page.locator(".row", { hasText: "node" });
   await expect(row).toContainText("Grew 2.1 GB in 40 min");
@@ -148,7 +205,22 @@ test.describe("quick access", () => {
 
 test.describe("docker rows load with the rest", () => {
   const svc = [
-    { id: "k1", key: "docker:build-cache", kind: "docker_disk", title: "Docker build cache", detail: null, reason: "Unused 25 h, rebuilds if needed", note: null, memory: 0, cpu: 0, ports: [], recommended: false, polite: true, verb: "Clear", disk: 12.7e9 },
+    {
+      id: "k1",
+      key: "docker:build-cache",
+      kind: "docker_disk",
+      title: "Docker build cache",
+      detail: null,
+      reason: "Unused 25 h, rebuilds if needed",
+      note: null,
+      memory: 0,
+      cpu: 0,
+      ports: [],
+      recommended: false,
+      polite: true,
+      verb: "Clear",
+      disk: 12.7e9,
+    },
   ];
 
   test("background results show at once, even while Docker is slow to answer", async ({ page }) => {
@@ -175,11 +247,25 @@ test.describe("docker rows load with the rest", () => {
 
 test("tooltips are Butters cards, short, never the system box", async ({ page }) => {
   await open(page, {
-    services: [{
-      id: "k3", key: "docker:old-images", kind: "docker_disk", title: "Old image versions ×14",
-      detail: "edge-runtime:v1.70.0, gotrue:v2.189.0, logflare:1.30.5, mailpit:v1.22.3, postgres-meta:v0.95.2, postgres:15.8.1.099, postgres:17.6.1.127",
-      reason: "Newer version kept, none in use", note: null, memory: 0, cpu: 0, ports: [], recommended: false, polite: true, verb: "Clear", disk: 14.02e9,
-    }],
+    services: [
+      {
+        id: "k3",
+        key: "docker:old-images",
+        kind: "docker_disk",
+        title: "Old image versions ×14",
+        detail:
+          "edge-runtime:v1.70.0, gotrue:v2.189.0, logflare:1.30.5, mailpit:v1.22.3, postgres-meta:v0.95.2, postgres:15.8.1.099, postgres:17.6.1.127",
+        reason: "Newer version kept, none in use",
+        note: null,
+        memory: 0,
+        cpu: 0,
+        ports: [],
+        recommended: false,
+        polite: true,
+        verb: "Clear",
+        disk: 14.02e9,
+      },
+    ],
   });
   // No native title tooltips anywhere in the panel.
   expect(await page.locator("[title]").count()).toBe(0);
@@ -187,7 +273,13 @@ test("tooltips are Butters cards, short, never the system box", async ({ page })
   // that is still pouring in can land before the tooltip is listening.
   const row = page.locator(".row", { hasText: "Old image versions" });
   await expect(row).toBeVisible();
-  await page.waitForFunction(() => document.getAnimations().every((a) => a.playState !== "running" || (a.effect as KeyframeEffect)?.getComputedTiming().iterations === Infinity));
+  await page.waitForFunction(() =>
+    document
+      .getAnimations()
+      .every(
+        (a) => a.playState !== "running" || (a.effect as KeyframeEffect)?.getComputedTiming().iterations === Infinity,
+      ),
+  );
   const label = row.locator("label.text");
   await label.hover();
   const card = page.locator(".butter-tip");
@@ -221,11 +313,56 @@ test("Docker quits only after its clean-ups and containers are done", async ({ p
   const MB = 1024 ** 2;
   await open(page, {
     suggestions: [
-      { id: "dk", key: "app:docker", kind: "container_runtime", title: "Docker", detail: null, reason: "No containers running", note: null, memory: 1500 * MB, cpu: 0, ports: [], recommended: true, polite: true, verb: "Quit", disk: 0 },
+      {
+        id: "dk",
+        key: "app:docker",
+        kind: "container_runtime",
+        title: "Docker",
+        detail: null,
+        reason: "No containers running",
+        note: null,
+        memory: 1500 * MB,
+        cpu: 0,
+        ports: [],
+        recommended: true,
+        polite: true,
+        verb: "Quit",
+        disk: 0,
+      },
     ],
     services: [
-      { id: "k1", key: "docker:build-cache", kind: "docker_disk", title: "Docker build cache", detail: null, reason: "Unused 25 h", note: null, memory: 0, cpu: 0, ports: [], recommended: true, polite: true, verb: "Clear", disk: 12.7e9 },
-      { id: "c1", key: "docker:db", kind: "docker_container", title: "Container: db", detail: null, reason: "No activity 6 d", note: null, memory: 300 * MB, cpu: 0, ports: [], recommended: true, polite: true, verb: "Stop", disk: 0 },
+      {
+        id: "k1",
+        key: "docker:build-cache",
+        kind: "docker_disk",
+        title: "Docker build cache",
+        detail: null,
+        reason: "Unused 25 h",
+        note: null,
+        memory: 0,
+        cpu: 0,
+        ports: [],
+        recommended: true,
+        polite: true,
+        verb: "Clear",
+        disk: 12.7e9,
+      },
+      {
+        id: "c1",
+        key: "docker:db",
+        kind: "docker_container",
+        title: "Container: db",
+        detail: null,
+        reason: "No activity 6 d",
+        note: null,
+        memory: 300 * MB,
+        cpu: 0,
+        ports: [],
+        recommended: true,
+        polite: true,
+        verb: "Stop",
+        disk: 0,
+      },
     ],
     cachedServices: null,
     sweep: [],

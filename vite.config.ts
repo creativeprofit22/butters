@@ -1,5 +1,5 @@
-import { defineConfig } from "vite";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
+import { defineConfig } from "vite";
 
 // Tauri expects a fixed port and must not pick up src-tauri changes.
 export default defineConfig({

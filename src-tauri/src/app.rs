@@ -13,15 +13,16 @@ use tauri::{AppHandle, Manager, State};
 
 use crate::actions::{self, Guard, Outcome, ProcTarget};
 use crate::alerts::{self, AlertState, Level};
+use crate::docker_activity::Activity;
 use crate::engine::assess::{self, Context, Verdict, fmt_bytes, fmt_duration};
 use crate::engine::model::{Group, Kind};
+use crate::history::{self, History, Summary};
+use crate::log::Log;
 use crate::platform;
 use crate::sampler::{self, Sampler, Stats};
 use crate::services;
-use crate::docker_activity::Activity;
-use crate::history::{self, History, Summary};
-use crate::trends::{Culprit, Trends};
 use crate::settings::Settings;
+use crate::trends::{Culprit, Trends};
 
 const MB: u64 = 1024 * 1024;
 const GB_U: u64 = 1024 * MB;
@@ -42,29 +43,53 @@ impl Default for FrontTracker {
 
 impl FrontTracker {
     pub fn new() -> Self {
-        FrontTracker { self_pid: std::process::id(), last_front: None, recent: HashMap::new() }
+        FrontTracker {
+            self_pid: std::process::id(),
+            last_front: None,
+            recent: HashMap::new(),
+        }
     }
 
     pub fn poll(&mut self) {
         if let Some(pid) = platform::frontmost_pid()
-            && pid != self.self_pid {
-                self.last_front = Some(pid);
-                self.recent.insert(pid, Instant::now());
-            }
+            && pid != self.self_pid
+        {
+            self.last_front = Some(pid);
+            self.recent.insert(pid, Instant::now());
+        }
         self.recent.retain(|_, t| t.elapsed().as_secs() < 6 * 3600);
     }
 
     fn recent_secs(&self) -> HashMap<u32, u64> {
-        self.recent.iter().map(|(pid, t)| (*pid, t.elapsed().as_secs())).collect()
+        self.recent
+            .iter()
+            .map(|(pid, t)| (*pid, t.elapsed().as_secs()))
+            .collect()
     }
 }
 
 #[derive(Debug, Clone)]
 enum Target {
-    Procs { key: String, kind: Kind, target: ProcTarget },
-    Container { key: String, id: String, name: String, memory: u64 },
-    Model { key: String, name: String, memory: u64 },
-    DockerDisk { key: String, which: DiskWhich },
+    Procs {
+        key: String,
+        kind: Kind,
+        target: ProcTarget,
+    },
+    Container {
+        key: String,
+        id: String,
+        name: String,
+        memory: u64,
+    },
+    Model {
+        key: String,
+        name: String,
+        memory: u64,
+    },
+    DockerDisk {
+        key: String,
+        which: DiskWhich,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -77,7 +102,31 @@ enum DiskWhich {
 impl Target {
     fn key(&self) -> &str {
         match self {
-            Target::Procs { key, .. } | Target::Container { key, .. } | Target::Model { key, .. } | Target::DockerDisk { key, .. } => key,
+            Target::Procs { key, .. }
+            | Target::Container { key, .. }
+            | Target::Model { key, .. }
+            | Target::DockerDisk { key, .. } => key,
+        }
+    }
+
+    /// Kind to count freed memory under in history. Docker clean-ups free disk,
+    /// not memory, so they have none and are recorded separately.
+    fn memory_kind(&self) -> Option<Kind> {
+        match self {
+            Target::Procs { kind, .. } => Some(*kind),
+            Target::Container { .. } => Some(Kind::DockerContainer),
+            Target::Model { .. } => Some(Kind::OllamaModel),
+            Target::DockerDisk { .. } => None,
+        }
+    }
+
+    /// What the log calls it (the same name the panel showed).
+    fn label(&self) -> String {
+        match self {
+            Target::Procs { target, .. } => target.title.clone(),
+            Target::Container { name, .. } => format!("Container: {name}"),
+            Target::Model { name, .. } => format!("Ollama model: {name}"),
+            Target::DockerDisk { key, .. } => key.clone(),
         }
     }
 }
@@ -102,37 +151,136 @@ pub struct AppState {
     /// The last Docker/Ollama result, so the panel can show it instantly
     /// while a fresh one is fetched.
     services_cache: Mutex<Option<ServicesResult>>,
+    /// Old image versions from the last full check, and when it ran. That
+    /// check takes five Docker calls and rarely changes, so services scans
+    /// reuse it for `OLD_IMAGES_TTL`.
+    old_images: Mutex<Option<(Instant, Vec<services::OldImage>)>>,
     pub alerts: Mutex<AlertState>,
     pub panel_open: AtomicBool,
     seq: AtomicU64,
+    pub log: Log,
+    /// What the log last said each list held (key -> title), so it only
+    /// notes what appeared or went away, not every refresh.
+    logged_procs: Mutex<HashMap<String, String>>,
+    logged_services: Mutex<HashMap<String, String>>,
 }
 
 impl AppState {
-    pub fn new(settings_path: PathBuf) -> Self {
-        let dir = settings_path.parent().unwrap_or(std::path::Path::new(".")).to_path_buf();
+    pub fn new(settings_path: PathBuf, log: Log) -> Self {
+        let dir = settings_path
+            .parent()
+            .unwrap_or(std::path::Path::new("."))
+            .to_path_buf();
         let history_path = History::path(&dir);
         let docker_activity_path = Activity::path(&dir);
+        let settings = Settings::load(&settings_path, &log);
+        log.info(format!("Settings: {}", settings_line(&settings)));
         AppState {
             sampler: Mutex::new(Sampler::new()),
             front: Mutex::new(FrontTracker::new()),
             targets: Mutex::new(HashMap::new()),
-            settings: Mutex::new(Settings::load(&settings_path)),
-            history: Mutex::new(History::load(&history_path)),
+            settings: Mutex::new(settings),
+            history: Mutex::new(History::load(&history_path, &log)),
             history_path,
             settings_path,
             started: Instant::now(),
             containers: Mutex::new(None),
             containers_all_idle: Mutex::new(None),
             trends: Mutex::new(Trends::default()),
-            docker_activity: Mutex::new(Activity::load(&docker_activity_path)),
+            docker_activity: Mutex::new(Activity::load(&docker_activity_path, &log)),
             docker_activity_path,
             leak_notified: Mutex::new(HashSet::new()),
             sweepable: Mutex::new(Vec::new()),
             services_cache: Mutex::new(None),
+            old_images: Mutex::new(None),
             alerts: Mutex::new(AlertState::default()),
             panel_open: AtomicBool::new(false),
             seq: AtomicU64::new(1),
+            log,
+            logged_procs: Mutex::new(HashMap::new()),
+            logged_services: Mutex::new(HashMap::new()),
         }
+    }
+}
+
+fn on_off(b: bool) -> &'static str {
+    if b { "on" } else { "off" }
+}
+
+fn settings_line(s: &Settings) -> String {
+    let shortcut = if s.shortcut.is_empty() {
+        "off"
+    } else {
+        s.shortcut.as_str()
+    };
+    format!(
+        "alerts {}, sounds {}, launch at login {}, shortcut {shortcut}, {} ignored",
+        on_off(s.alerts),
+        on_off(s.sounds),
+        on_off(s.launch_at_login),
+        s.ignored.len()
+    )
+}
+
+fn kind_name(kind: Kind) -> String {
+    serde_json::to_value(kind)
+        .ok()
+        .and_then(|v| v.as_str().map(str::to_string))
+        .unwrap_or_default()
+}
+
+/// Logs what's new in a list since the last time it was logged, and what
+/// went away. Unchanged items stay silent.
+fn log_list_changes(
+    log: &Log,
+    logged: &Mutex<HashMap<String, String>>,
+    suggestions: &[Suggestion],
+) {
+    let mut logged = lock(logged);
+    let now: HashMap<String, String> = suggestions
+        .iter()
+        .map(|s| (s.key.clone(), s.title.clone()))
+        .collect();
+    let mut gone: Vec<&String> = logged
+        .iter()
+        .filter(|(k, _)| !now.contains_key(*k))
+        .map(|(_, t)| t)
+        .collect();
+    gone.sort();
+    for title in gone {
+        log.info(format!("No longer suggesting \"{title}\""));
+    }
+    for s in suggestions.iter().filter(|s| !logged.contains_key(&s.key)) {
+        let size = if s.disk > 0 {
+            format!("{} disk", fmt_bytes(s.disk))
+        } else {
+            fmt_bytes(s.memory)
+        };
+        log.info(format!(
+            "Suggesting \"{}\" ({}): {}, {size}, CPU {:.0}%{}{}",
+            s.title,
+            kind_name(s.kind),
+            s.reason,
+            s.cpu,
+            if s.recommended { ", pre-ticked" } else { "" },
+            s.note
+                .as_deref()
+                .map(|n| format!(", note: {n}"))
+                .unwrap_or_default(),
+        ));
+    }
+    *logged = now;
+}
+
+/// How a close went, for the log.
+fn outcome_entry(outcome: &Outcome) -> (crate::log::Level, &'static str, &str) {
+    use crate::log::Level as L;
+    match outcome {
+        Outcome::Closed { message, .. } => (L::Info, "Closed", message),
+        Outcome::StillRunning { message } => (L::Warn, "Still running after asking", message),
+        Outcome::NeedsForce { message } => (L::Warn, "Needs force close", message),
+        Outcome::Refused { message } => (L::Warn, "Refused to close", message),
+        Outcome::Failed { message } => (L::Error, "Failed to close", message),
     }
 }
 
@@ -217,6 +365,19 @@ fn scan_context(state: &AppState) -> Context {
 fn do_scan(state: &AppState) -> ScanResult {
     let t0 = Instant::now();
     let ports = sampler::listening_ports();
+    // Wait out the warm-up without the lock, so live meters and the
+    // background sample aren't stuck behind it.
+    let warmed = {
+        let mut s = lock(&state.sampler);
+        let needed = s.needs_warm_up();
+        if needed {
+            s.warm_up();
+        }
+        needed
+    };
+    if warmed {
+        std::thread::sleep(sampler::WARM_UP);
+    }
     let (mut procs, stats) = {
         let mut s = lock(&state.sampler);
         let procs = s.snapshot(&ports);
@@ -235,102 +396,32 @@ fn do_scan(state: &AppState) -> ScanResult {
     let start_of: HashMap<u32, u64> = procs.iter().map(|p| (p.pid, p.start_time)).collect();
     let seq = state.seq.fetch_add(1, Ordering::Relaxed);
 
-    let only = e2e_only_pid();
-    let mut protected_groups: Vec<(Group, assess::Protection)> = Vec::new();
-    let mut picked: Vec<(Group, String, bool, Option<String>)> = Vec::new();
-    let mut protected = Vec::new();
-    for a in assessed {
-        let g = a.group;
-        match a.verdict {
-            Verdict::Suggest { reason, recommended, note } => {
-                if only.is_some_and(|pid| !g.members.contains(&pid)) {
-                    continue;
-                }
-                // Identical leftovers (same tool, all orphaned) become one card.
-                let same = picked.iter_mut().find(|(p, r, _, _)| g.orphaned && p.orphaned && p.kind == g.kind && base_title(&p.title) == g.title && *r == reason);
-                match same {
-                    Some((p, _, _, _)) => merge_into(p, g),
-                    None => picked.push((g, reason, recommended, note)),
-                }
-            }
-            Verdict::Protected(p) => {
-                if g.memory >= 150 * MB || g.cpu >= 10.0 {
-                    protected_groups.push((g, p));
-                }
-            }
-            Verdict::Quiet => {}
-        }
-    }
-
-    let mut suggestions = Vec::new();
+    let (picked, protected_groups) = sort_verdicts(assessed, e2e_only_pid());
     let mut targets: HashMap<String, Target> = HashMap::new();
-    for (i, (g, reason, recommended, note)) in picked.into_iter().enumerate() {
+    let mut suggestions = Vec::new();
+    for (i, p) in picked.into_iter().enumerate() {
         let id = format!("p{seq}-{i}");
-        let members: Vec<(u32, u64)> = g.members.iter().filter_map(|m| start_of.get(m).map(|s| (*m, *s))).collect();
-        let polite = platform::can_ask_politely(g.app_pid, &g.members);
-        let detail = match (&g.detail, g.ports.is_empty()) {
-            (Some(d), false) => Some(format!("{d} · {}", ports_text(&g.ports))),
-            (None, false) => Some(ports_text(&g.ports)),
-            (d, true) => d.clone(),
-        };
-        suggestions.push(Suggestion {
-            id: id.clone(),
-            key: format!("{}#{}", g.key, g.root),
-            kind: g.kind,
-            title: g.title.clone(),
-            detail,
-            reason,
-            note,
-            memory: g.memory,
-            cpu: g.cpu,
-            ports: g.ports.clone(),
-            recommended,
-            polite,
-            verb: if g.app_pid.is_some() { "Quit" } else { "Stop" },
-            disk: 0,
-        });
-        targets.insert(
-            id,
-            Target::Procs {
-                key: g.key.clone(),
-                kind: g.kind,
-                target: ProcTarget { title: g.title.clone(), members, app_pid: g.app_pid, memory: g.memory },
-            },
-        );
+        targets.insert(id.clone(), proc_target(&p.group, &start_of));
+        suggestions.push(proc_suggestion(id, p));
     }
-    protected_groups.sort_by_key(|(g, _)| std::cmp::Reverse(g.memory));
-    protected_groups.truncate(12);
-    for (i, (g, p)) in protected_groups.into_iter().enumerate() {
-        let id = p.user_closable().then(|| format!("x{seq}-{i}"));
-        if let Some(id) = &id {
-            let members: Vec<(u32, u64)> = g.members.iter().filter_map(|m| start_of.get(m).map(|s| (*m, *s))).collect();
-            targets.insert(
-                id.clone(),
-                Target::Procs {
-                    key: g.key.clone(),
-                    kind: g.kind,
-                    target: ProcTarget { title: g.title.clone(), members, app_pid: g.app_pid, memory: g.memory },
-                },
-            );
-        }
-        protected.push(Protected {
-            id,
-            key: format!("{}#{}", g.key, g.root),
-            verb: if g.app_pid.is_some() { "Quit" } else { "Stop" },
-            title: g.title,
-            kind: g.kind,
-            memory: g.memory,
-            cpu: g.cpu,
-            reason: p.text(),
-        });
-    }
-    suggestions.sort_by(|a, b| b.recommended.cmp(&a.recommended).then(weight(b).total_cmp(&weight(a))));
+    let protected = protected_cards(protected_groups, seq, &start_of, &mut targets);
+    suggestions.sort_by(|a, b| {
+        b.recommended
+            .cmp(&a.recommended)
+            .then(weight(b).total_cmp(&weight(a)))
+    });
 
     {
         let mut sw = lock(&state.sweepable);
         sw.retain(|id| !id.starts_with('p'));
-        sw.extend(suggestions.iter().filter(|s| sweepable(s)).map(|s| s.id.clone()));
+        sw.extend(
+            suggestions
+                .iter()
+                .filter(|s| sweepable(s))
+                .map(|s| s.id.clone()),
+        );
     }
+    log_list_changes(&state.log, &state.logged_procs, &suggestions);
     // Keep the latest service targets; replace process ones.
     {
         let mut t = lock(&state.targets);
@@ -347,6 +438,141 @@ fn do_scan(state: &AppState) -> ScanResult {
     }
 }
 
+/// A process group the scan suggests closing, with the verdict's wording.
+struct Picked {
+    group: Group,
+    reason: String,
+    recommended: bool,
+    note: Option<String>,
+}
+
+/// Splits assessed groups into suggestions (identical leftovers merged into
+/// one card) and heavy protected groups worth showing.
+fn sort_verdicts(
+    assessed: Vec<assess::Assessed>,
+    only: Option<u32>,
+) -> (Vec<Picked>, Vec<(Group, assess::Protection)>) {
+    let mut picked: Vec<Picked> = Vec::new();
+    let mut protected_groups: Vec<(Group, assess::Protection)> = Vec::new();
+    for a in assessed {
+        let g = a.group;
+        match a.verdict {
+            Verdict::Suggest {
+                reason,
+                recommended,
+                note,
+            } => {
+                if only.is_some_and(|pid| !g.members.contains(&pid)) {
+                    continue;
+                }
+                // Identical leftovers (same tool, all orphaned) become one card.
+                let same = picked.iter_mut().find(|p| {
+                    g.orphaned
+                        && p.group.orphaned
+                        && p.group.kind == g.kind
+                        && base_title(&p.group.title) == g.title
+                        && p.reason == reason
+                });
+                match same {
+                    Some(p) => merge_into(&mut p.group, g),
+                    None => picked.push(Picked {
+                        group: g,
+                        reason,
+                        recommended,
+                        note,
+                    }),
+                }
+            }
+            Verdict::Protected(p) => {
+                if g.memory >= 150 * MB || g.cpu >= 10.0 {
+                    protected_groups.push((g, p));
+                }
+            }
+            Verdict::Quiet => {}
+        }
+    }
+    (picked, protected_groups)
+}
+
+/// The close target for a process group, pinned to each member's start time.
+fn proc_target(g: &Group, start_of: &HashMap<u32, u64>) -> Target {
+    let members: Vec<(u32, u64)> = g
+        .members
+        .iter()
+        .filter_map(|m| start_of.get(m).map(|s| (*m, *s)))
+        .collect();
+    Target::Procs {
+        key: g.key.clone(),
+        kind: g.kind,
+        target: ProcTarget {
+            title: g.title.clone(),
+            members,
+            app_pid: g.app_pid,
+            memory: g.memory,
+        },
+    }
+}
+
+fn proc_verb(g: &Group) -> &'static str {
+    if g.app_pid.is_some() { "Quit" } else { "Stop" }
+}
+
+fn proc_suggestion(id: String, p: Picked) -> Suggestion {
+    let g = p.group;
+    let polite = platform::can_ask_politely(g.app_pid, &g.members);
+    let detail = match (&g.detail, g.ports.is_empty()) {
+        (Some(d), false) => Some(format!("{d} · {}", ports_text(&g.ports))),
+        (None, false) => Some(ports_text(&g.ports)),
+        (d, true) => d.clone(),
+    };
+    Suggestion {
+        id,
+        key: format!("{}#{}", g.key, g.root),
+        kind: g.kind,
+        verb: proc_verb(&g),
+        title: g.title,
+        detail,
+        reason: p.reason,
+        note: p.note,
+        memory: g.memory,
+        cpu: g.cpu,
+        ports: g.ports,
+        recommended: p.recommended,
+        polite,
+        disk: 0,
+    }
+}
+
+/// The heaviest protected groups as cards; those the user may close anyway
+/// get an id and a target.
+fn protected_cards(
+    mut groups: Vec<(Group, assess::Protection)>,
+    seq: u64,
+    start_of: &HashMap<u32, u64>,
+    targets: &mut HashMap<String, Target>,
+) -> Vec<Protected> {
+    groups.sort_by_key(|(g, _)| std::cmp::Reverse(g.memory));
+    groups.truncate(12);
+    let mut protected = Vec::new();
+    for (i, (g, p)) in groups.into_iter().enumerate() {
+        let id = p.user_closable().then(|| format!("x{seq}-{i}"));
+        if let Some(id) = &id {
+            targets.insert(id.clone(), proc_target(&g, start_of));
+        }
+        protected.push(Protected {
+            id,
+            key: format!("{}#{}", g.key, g.root),
+            verb: proc_verb(&g),
+            title: g.title,
+            kind: g.kind,
+            memory: g.memory,
+            cpu: g.cpu,
+            reason: p.text(),
+        });
+    }
+    protected
+}
+
 fn base_title(t: &str) -> &str {
     match t.rsplit_once(" ×") {
         Some((b, n)) if n.parse::<usize>().is_ok() => b,
@@ -356,8 +582,17 @@ fn base_title(t: &str) -> &str {
 
 /// Folds another leftover copy into `into`, counting copies in the title.
 fn merge_into(into: &mut Group, other: Group) {
-    let copies = into.title.rsplit_once(" ×").and_then(|(_, n)| n.parse::<usize>().ok()).unwrap_or(1) + 1;
-    let base = into.title.rsplit_once(" ×").map(|(b, _)| b.to_string()).unwrap_or_else(|| into.title.clone());
+    let copies = into
+        .title
+        .rsplit_once(" ×")
+        .and_then(|(_, n)| n.parse::<usize>().ok())
+        .unwrap_or(1)
+        + 1;
+    let base = into
+        .title
+        .rsplit_once(" ×")
+        .map(|(b, _)| b.to_string())
+        .unwrap_or_else(|| into.title.clone());
     into.title = format!("{base} ×{copies}");
     if into.detail != other.detail {
         into.detail = Some(format!("{copies} folders"));
@@ -395,7 +630,11 @@ fn weight(s: &Suggestion) -> f64 {
 fn ports_text(ports: &[u16]) -> String {
     let shown: Vec<String> = ports.iter().take(3).map(|p| format!(":{p}")).collect();
     let more = ports.len().saturating_sub(3);
-    if more > 0 { format!("{} +{more}", shown.join(" ")) } else { shown.join(" ") }
+    if more > 0 {
+        format!("{} +{more}", shown.join(" "))
+    } else {
+        shown.join(" ")
+    }
 }
 
 /// Playground builds: keep only the Playground's own test processes (and
@@ -438,7 +677,9 @@ fn playground_view(procs: &mut Vec<crate::engine::model::ProcInfo>) {
 fn e2e_only_pid() -> Option<u32> {
     #[cfg(debug_assertions)]
     {
-        std::env::var("BUTTERS_E2E_ONLY_PID").ok().and_then(|v| v.parse().ok())
+        std::env::var("BUTTERS_E2E_ONLY_PID")
+            .ok()
+            .and_then(|v| v.parse().ok())
     }
     #[cfg(not(debug_assertions))]
     {
@@ -454,8 +695,15 @@ fn observe_docker(state: &AppState, containers: Option<&[services::Container]>) 
         Some(cs) => {
             let mut act = lock(&state.docker_activity);
             act.observe(cs, now);
-            let _ = act.save(&state.docker_activity_path);
-            let all_idle = !cs.is_empty() && cs.iter().all(|c| act.idle(&c.id, now).is_some_and(|i| i.secs >= DAY));
+            crate::json_file::log_save(
+                &state.log,
+                &state.docker_activity_path,
+                act.save(&state.docker_activity_path),
+            );
+            let all_idle = !cs.is_empty()
+                && cs
+                    .iter()
+                    .all(|c| act.idle(&c.id, now).is_some_and(|i| i.secs >= DAY));
             *lock(&state.containers) = Some(cs.len());
             *lock(&state.containers_all_idle) = Some(all_idle);
         }
@@ -467,13 +715,22 @@ fn observe_docker(state: &AppState, containers: Option<&[services::Container]>) 
 }
 
 const DAY: u64 = 24 * 60 * 60;
+const OLD_IMAGES_TTL: std::time::Duration = std::time::Duration::from_secs(10 * 60);
 
 fn do_scan_services(state: &AppState) -> ServicesResult {
+    let cached_old = lock(&state.old_images)
+        .as_ref()
+        .filter(|(at, _)| at.elapsed() < OLD_IMAGES_TTL)
+        .map(|(_, v)| v.clone());
+    let reused = cached_old.is_some();
     let docker = std::thread::spawn(services::docker_containers);
-    let disk = std::thread::spawn(services::docker_disk);
+    let disk = std::thread::spawn(move || services::docker_disk_with(cached_old));
     let ollama = std::thread::spawn(services::ollama_models);
     let mut containers = docker.join().ok().flatten();
     let mut disk = disk.join().ok().flatten();
+    if !reused && let Some(d) = &disk {
+        *lock(&state.old_images) = Some((Instant::now(), d.old_images.clone()));
+    }
     let mut models = ollama.join().ok().flatten();
     if e2e_only_pid().is_some() || cfg!(feature = "playground") {
         containers = None;
@@ -486,92 +743,238 @@ fn do_scan_services(state: &AppState) -> ServicesResult {
     let mut targets = HashMap::new();
 
     observe_docker(state, containers.as_deref());
+    container_cards(
+        state,
+        containers.as_deref().unwrap_or_default(),
+        seq,
+        &ignored,
+        &mut suggestions,
+        &mut targets,
+    );
+    if let Some(d) = disk {
+        docker_disk_cards(d, seq, &ignored, &mut suggestions, &mut targets);
+    }
+    model_cards(
+        models.as_deref().unwrap_or_default(),
+        seq,
+        &ignored,
+        &mut suggestions,
+        &mut targets,
+    );
+    {
+        let mut t = lock(&state.targets);
+        t.retain(|_, v| matches!(v, Target::Procs { .. }));
+        t.extend(targets);
+    }
+    {
+        let mut sw = lock(&state.sweepable);
+        sw.retain(|id| id.starts_with('p'));
+        sw.extend(
+            suggestions
+                .iter()
+                .filter(|s| sweepable(s))
+                .map(|s| s.id.clone()),
+        );
+    }
+    log_list_changes(&state.log, &state.logged_services, &suggestions);
+    let result = ServicesResult {
+        suggestions,
+        docker: if containers.is_some() {
+            "running"
+        } else {
+            "off"
+        },
+        ollama: if models.is_some() { "running" } else { "off" },
+    };
+    let previous = lock(&state.services_cache).replace(result.clone());
+    for (name, was, now) in [
+        ("Docker", previous.as_ref().map(|p| p.docker), result.docker),
+        ("Ollama", previous.as_ref().map(|p| p.ollama), result.ollama),
+    ] {
+        if was != Some(now) {
+            state.log.info(format!("{name} is {now}"));
+        }
+    }
+    result
+}
+
+/// One idle container's card. A `--rm` container is deleted (with its
+/// unnamed volumes) when stopped, so it gets a caution note, which also keeps
+/// it out of the sweep, and is never pre-ticked.
+fn container_suggestion(
+    c: &services::Container,
+    idle: &crate::docker_activity::Idle,
+    id: String,
+    key: String,
+) -> Suggestion {
+    let detail = match &c.project {
+        Some(p) => format!("{} · {p}", c.image),
+        None => c.image.clone(),
+    };
+    Suggestion {
+        id,
+        key,
+        kind: Kind::DockerContainer,
+        title: format!("Container: {}", c.name),
+        detail: Some(detail),
+        reason: format!(
+            "No activity {}{}",
+            fmt_duration(idle.secs),
+            if idle.lower_bound { "+" } else { "" }
+        ),
+        note: c
+            .auto_remove
+            .then(|| "Stopping deletes it (--rm)".to_string()),
+        memory: c.memory,
+        cpu: c.cpu,
+        ports: Vec::new(),
+        recommended: idle.secs >= DAY && !c.auto_remove,
+        polite: true,
+        verb: "Stop",
+        disk: 0,
+    }
+}
+
+/// Containers measured quiet for an hour or more; a day pre-ticks them.
+fn container_cards(
+    state: &AppState,
+    containers: &[services::Container],
+    seq: u64,
+    ignored: &[String],
+    suggestions: &mut Vec<Suggestion>,
+    targets: &mut HashMap<String, Target>,
+) {
     let now = history::now_secs();
-    for (i, c) in containers.iter().flatten().enumerate() {
+    for (i, c) in containers.iter().enumerate() {
         let key = format!("docker:{}", c.name);
         let idle = lock(&state.docker_activity).idle(&c.id, now);
-        // Only containers measured quiet for an hour or more; a day pre-ticks it.
-        let Some(idle) = idle.filter(|i| i.secs >= 60 * 60) else { continue };
+        let Some(idle) = idle.filter(|i| i.secs >= 60 * 60) else {
+            continue;
+        };
         if c.cpu >= 1.0 || ignored.contains(&key) {
             continue;
         }
         let id = format!("d{seq}-{i}");
-        let detail = match &c.project {
-            Some(p) => format!("{} · {p}", c.image),
-            None => c.image.clone(),
-        };
+        suggestions.push(container_suggestion(c, &idle, id.clone(), key.clone()));
+        targets.insert(
+            id,
+            Target::Container {
+                key,
+                id: c.id.clone(),
+                name: c.name.clone(),
+                memory: c.memory,
+            },
+        );
+    }
+}
+
+/// Disk Docker can give back without touching anything you use.
+fn docker_disk_cards(
+    d: services::DockerDisk,
+    seq: u64,
+    ignored: &[String],
+    suggestions: &mut Vec<Suggestion>,
+    targets: &mut HashMap<String, Target>,
+) {
+    let cache_reason = match d.build_cache_idle {
+        Some(secs) if secs >= DAY => {
+            format!("Unused {}, rebuilds if needed", fmt_duration(secs))
+        }
+        _ => "Rebuilds when needed".to_string(),
+    };
+    let old_count = d.old_images.len();
+    let old_bytes: u64 = d.old_images.iter().map(|i| i.size).sum();
+    let old_refs: Vec<String> = d.old_images.iter().map(|i| i.reference.clone()).collect();
+    let old_detail = d
+        .old_images
+        .iter()
+        .map(|i| {
+            i.reference
+                .rsplit('/')
+                .next()
+                .unwrap_or(&i.reference)
+                .to_string()
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let items = [
+        (
+            DiskWhich::BuildCache,
+            "docker:build-cache",
+            "Docker build cache".to_string(),
+            cache_reason,
+            None,
+            d.build_cache,
+            GB_U,
+        ),
+        (
+            DiskWhich::DanglingImages,
+            "docker:dangling",
+            "Untagged Docker images".to_string(),
+            "Left over from rebuilds".to_string(),
+            None,
+            d.dangling_images,
+            500 * MB,
+        ),
+        (
+            DiskWhich::OldImages(old_refs),
+            "docker:old-images",
+            format!("Old image versions ×{old_count}"),
+            "Newer version kept, none in use".to_string(),
+            Some(old_detail),
+            old_bytes,
+            GB_U,
+        ),
+    ];
+    for (i, (which, key, title, reason, detail, bytes, min)) in items.into_iter().enumerate() {
+        if bytes < min || ignored.iter().any(|k| k == key) {
+            continue;
+        }
+        let id = format!("k{seq}-{i}");
         suggestions.push(Suggestion {
             id: id.clone(),
-            key: key.clone(),
-            kind: Kind::DockerContainer,
-            title: format!("Container: {}", c.name),
-            detail: Some(detail),
-            reason: format!("No activity {}{}", fmt_duration(idle.secs), if idle.lower_bound { "+" } else { "" }),
+            key: key.to_string(),
+            kind: Kind::DockerDisk,
+            title,
+            detail,
+            reason,
             note: None,
-            memory: c.memory,
-            cpu: c.cpu,
+            memory: 0,
+            cpu: 0.0,
             ports: Vec::new(),
-            recommended: idle.secs >= DAY,
+            recommended: false,
             polite: true,
-            verb: "Stop",
-            disk: 0,
+            verb: "Clear",
+            disk: bytes,
         });
-        targets.insert(id, Target::Container { key, id: c.id.clone(), name: c.name.clone(), memory: c.memory });
-    }
-    // Disk Docker can give back without touching anything you use.
-    if let Some(d) = disk {
-        let cache_reason = match d.build_cache_idle {
-            Some(secs) if secs >= DAY => format!("Unused {}, rebuilds if needed", fmt_duration(secs)),
-            _ => "Rebuilds when needed".to_string(),
-        };
-        let old_count = d.old_images.len();
-        let old_bytes: u64 = d.old_images.iter().map(|i| i.size).sum();
-        let old_refs: Vec<String> = d.old_images.iter().map(|i| i.reference.clone()).collect();
-        let old_detail = d.old_images.iter().map(|i| i.reference.rsplit('/').next().unwrap_or(&i.reference).to_string()).collect::<Vec<_>>().join(", ");
-        let items = [
-            (DiskWhich::BuildCache, "docker:build-cache", "Docker build cache".to_string(), cache_reason, None, d.build_cache, GB_U),
-            (DiskWhich::DanglingImages, "docker:dangling", "Untagged Docker images".to_string(), "Left over from rebuilds".to_string(), None, d.dangling_images, 500 * MB),
-            (
-                DiskWhich::OldImages(old_refs),
-                "docker:old-images",
-                format!("Old image versions ×{old_count}"),
-                "Newer version kept, none in use".to_string(),
-                Some(old_detail),
-                old_bytes,
-                GB_U,
-            ),
-        ];
-        for (i, (which, key, title, reason, detail, bytes, min)) in items.into_iter().enumerate() {
-            if bytes < min || ignored.iter().any(|k| k == key) {
-                continue;
-            }
-            let id = format!("k{seq}-{i}");
-            suggestions.push(Suggestion {
-                id: id.clone(),
+        targets.insert(
+            id,
+            Target::DockerDisk {
                 key: key.to_string(),
-                kind: Kind::DockerDisk,
-                title,
-                detail,
-                reason,
-                note: None,
-                memory: 0,
-                cpu: 0.0,
-                ports: Vec::new(),
-                recommended: false,
-                polite: true,
-                verb: "Clear",
-                disk: bytes,
-            });
-            targets.insert(id, Target::DockerDisk { key: key.to_string(), which });
-        }
+                which,
+            },
+        );
     }
-    for (i, m) in models.iter().flatten().enumerate() {
+}
+
+/// Loaded Ollama models; recommended when they'd stay loaded a long while.
+fn model_cards(
+    models: &[services::LoadedModel],
+    seq: u64,
+    ignored: &[String],
+    suggestions: &mut Vec<Suggestion>,
+    targets: &mut HashMap<String, Target>,
+) {
+    for (i, m) in models.iter().enumerate() {
         let key = format!("ollama:{}", m.name);
         if ignored.contains(&key) {
             continue;
         }
         let (reason, recommended) = match m.expires_in {
-            Some(s) if s <= 5 * 60 => (format!("Unloads in {}", fmt_duration(s.max(60) as u64)), false),
+            Some(s) if s <= 5 * 60 => (
+                format!("Unloads in {}", fmt_duration(s.max(60) as u64)),
+                false,
+            ),
             Some(s) => (format!("Kept {} more", fmt_duration(s as u64)), s > 30 * 60),
             None => ("Loaded".to_string(), false),
         };
@@ -592,25 +995,15 @@ fn do_scan_services(state: &AppState) -> ServicesResult {
             verb: "Unload",
             disk: 0,
         });
-        targets.insert(id, Target::Model { key, name: m.name.clone(), memory: m.size });
+        targets.insert(
+            id,
+            Target::Model {
+                key,
+                name: m.name.clone(),
+                memory: m.size,
+            },
+        );
     }
-    {
-        let mut t = lock(&state.targets);
-        t.retain(|_, v| matches!(v, Target::Procs { .. }));
-        t.extend(targets);
-    }
-    {
-        let mut sw = lock(&state.sweepable);
-        sw.retain(|id| id.starts_with('p'));
-        sw.extend(suggestions.iter().filter(|s| sweepable(s)).map(|s| s.id.clone()));
-    }
-    let result = ServicesResult {
-        suggestions,
-        docker: if containers.is_some() { "running" } else { "off" },
-        ollama: if models.is_some() { "running" } else { "off" },
-    };
-    *lock(&state.services_cache) = Some(result.clone());
-    result
 }
 
 fn blocking_err(e: impl std::fmt::Display) -> String {
@@ -649,10 +1042,19 @@ pub fn smoothness(state: State<'_, AppState>) -> Summary {
 }
 
 /// Live meters: called every couple of seconds while the panel is open.
+/// Async so it never runs on the main thread: a scan can hold the sampler
+/// for a moment, and waiting there would freeze the tray and panel.
 #[tauri::command]
-pub fn live_stats(state: State<'_, AppState>) -> LiveStats {
-    let stats = lock(&state.sampler).quick_stats();
-    LiveStats { level: alerts::level(&stats), stats }
+pub async fn live_stats(app: AppHandle) -> Result<LiveStats, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let stats = lock(&app.state::<AppState>().sampler).quick_stats();
+        LiveStats {
+            level: alerts::level(&stats),
+            stats,
+        }
+    })
+    .await
+    .map_err(blocking_err)
 }
 
 #[derive(Serialize)]
@@ -664,7 +1066,9 @@ pub struct LiveStats {
 
 #[tauri::command]
 pub async fn scan(app: AppHandle) -> Result<ScanResult, String> {
-    tauri::async_runtime::spawn_blocking(move || do_scan(&app.state::<AppState>())).await.map_err(blocking_err)
+    tauri::async_runtime::spawn_blocking(move || do_scan(&app.state::<AppState>()))
+        .await
+        .map_err(blocking_err)
 }
 
 /// The last Docker/Ollama result, instantly (None before the first one).
@@ -676,75 +1080,133 @@ pub fn cached_services(state: State<'_, AppState>) -> Option<ServicesResult> {
 
 #[tauri::command]
 pub async fn scan_services(app: AppHandle) -> Result<ServicesResult, String> {
-    tauri::async_runtime::spawn_blocking(move || do_scan_services(&app.state::<AppState>())).await.map_err(blocking_err)
+    tauri::async_runtime::spawn_blocking(move || do_scan_services(&app.state::<AppState>()))
+        .await
+        .map_err(blocking_err)
 }
 
 #[tauri::command]
 pub async fn close_item(app: AppHandle, id: String, force: bool) -> Result<Outcome, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
-        let Some(target) = lock(&state.targets).get(&id).cloned() else {
-            return Outcome::Refused { message: "List changed. Refresh.".into() };
-        };
-        let outcome = match &target {
-            Target::Procs { target, .. } => {
-                let frontmost = lock(&state.front).last_front;
-                actions::close(target, force, &Guard::current(frontmost))
-            }
-            Target::Container { id: cid, name, memory, .. } => match services::docker_stop(cid) {
-                Ok(()) => Outcome::Closed { message: format!("Stopped {name}"), freed: *memory, disk: 0 },
-                Err(e) => Outcome::Failed { message: format!("Couldn't stop: {e}") },
-            },
-            Target::Model { name, memory, .. } => match services::ollama_unload(name) {
-                Ok(()) => Outcome::Closed { message: format!("Unloaded {name}"), freed: *memory, disk: 0 },
-                Err(e) => Outcome::Failed { message: format!("Couldn't unload: {e}") },
-            },
-            Target::DockerDisk { which, .. } => {
-                let r = match which {
-                    DiskWhich::BuildCache => services::docker_prune_build_cache(),
-                    DiskWhich::DanglingImages => services::docker_prune_dangling_images(),
-                    DiskWhich::OldImages(refs) => services::docker_remove_old_images(refs).map(|(_, bytes)| bytes),
-                };
-                match r {
-                    Ok(bytes) => Outcome::Closed { message: format!("Cleared {}", fmt_bytes(bytes)), freed: 0, disk: bytes },
-                    Err(e) => Outcome::Failed { message: format!("Couldn't clear: {e}") },
-                }
-            }
-        };
-        if let Outcome::Closed { freed, disk, .. } = &outcome {
-            lock(&state.targets).remove(&id);
-            if let Target::DockerDisk { .. } = &target {
-                let mut h = lock(&state.history);
-                h.record_disk(*disk);
-                let _ = h.save(&state.history_path);
-                return outcome;
-            }
-            let kind = match &target {
-                Target::Procs { kind, .. } => *kind,
-                Target::Container { .. } => Kind::DockerContainer,
-                Target::Model { .. } | Target::DockerDisk { .. } => Kind::OllamaModel,
-            };
-            let kind = serde_json::to_value(kind).ok().and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default();
-            let mut h = lock(&state.history);
-            h.record_freed(history::today(), *freed, &kind);
-            let _ = h.save(&state.history_path);
-        }
-        outcome
+        close_target(&state, &id, force)
     })
     .await
     .map_err(blocking_err)
 }
 
+/// Closes what the last scan listed under `id` and records what was freed.
+fn close_target(state: &AppState, id: &str, force: bool) -> Outcome {
+    {
+        let Some(target) = lock(&state.targets).get(id).cloned() else {
+            state
+                .log
+                .warn("Close asked for an item from an old list; told the panel to refresh");
+            return Outcome::Refused {
+                message: "List changed. Refresh.".into(),
+            };
+        };
+        let label = target.label();
+        state.log.info(format!(
+            "Closing \"{label}\"{}",
+            if force { " (force)" } else { "" }
+        ));
+        let outcome = match &target {
+            Target::Procs { target, .. } => {
+                let frontmost = lock(&state.front).last_front;
+                actions::close(target, force, &Guard::current(frontmost))
+            }
+            Target::Container {
+                id: cid,
+                name,
+                memory,
+                ..
+            } => match services::docker_stop(cid) {
+                Ok(()) => Outcome::Closed {
+                    message: format!("Stopped {name}"),
+                    freed: *memory,
+                    disk: 0,
+                },
+                Err(e) => Outcome::Failed {
+                    message: format!("Couldn't stop: {e}"),
+                },
+            },
+            Target::Model { name, memory, .. } => match services::ollama_unload(name) {
+                Ok(()) => Outcome::Closed {
+                    message: format!("Unloaded {name}"),
+                    freed: *memory,
+                    disk: 0,
+                },
+                Err(e) => Outcome::Failed {
+                    message: format!("Couldn't unload: {e}"),
+                },
+            },
+            Target::DockerDisk { which, .. } => {
+                // Images may change; the next services scan checks afresh.
+                *lock(&state.old_images) = None;
+                let r = match which {
+                    DiskWhich::BuildCache => services::docker_prune_build_cache(),
+                    DiskWhich::DanglingImages => services::docker_prune_dangling_images(),
+                    DiskWhich::OldImages(refs) => {
+                        services::docker_remove_old_images(refs).map(|(_, bytes)| bytes)
+                    }
+                };
+                match r {
+                    Ok(bytes) => Outcome::Closed {
+                        message: format!("Cleared {}", fmt_bytes(bytes)),
+                        freed: 0,
+                        disk: bytes,
+                    },
+                    Err(e) => Outcome::Failed {
+                        message: format!("Couldn't clear: {e}"),
+                    },
+                }
+            }
+        };
+        let (level, what, message) = outcome_entry(&outcome);
+        state
+            .log
+            .write(level, &format!("{what} \"{label}\": {message}"));
+        if let Outcome::Closed { freed, disk, .. } = &outcome {
+            lock(&state.targets).remove(id);
+            let Some(kind) = target.memory_kind() else {
+                let mut h = lock(&state.history);
+                h.record_disk(*disk);
+                crate::json_file::log_save(
+                    &state.log,
+                    &state.history_path,
+                    h.save(&state.history_path),
+                );
+                return outcome;
+            };
+            let kind = kind_name(kind);
+            let mut h = lock(&state.history);
+            h.record_freed(history::today(), *freed, &kind);
+            crate::json_file::log_save(
+                &state.log,
+                &state.history_path,
+                h.save(&state.history_path),
+            );
+        }
+        outcome
+    }
+}
+
 #[tauri::command]
 pub fn ignore_item(state: State<'_, AppState>, id: String) -> Result<(), String> {
-    let key = lock(&state.targets).get(&id).map(|t| t.key().to_string()).ok_or("List changed. Refresh.")?;
+    let (key, label) = lock(&state.targets)
+        .get(&id)
+        .map(|t| (t.key().to_string(), t.label()))
+        .ok_or("List changed. Refresh.")?;
+    state.log.info(format!("Ignoring \"{label}\" from now on"));
     let mut s = lock(&state.settings);
     if !s.ignored.contains(&key) {
         s.ignored.push(key);
     }
     let cleaned = s.clone().sanitized();
     *s = cleaned;
-    s.save(&state.settings_path).map_err(|e| format!("Couldn't save settings: {e}"))
+    s.save(&state.settings_path)
+        .map_err(|e| format!("Couldn't save settings: {e}"))
 }
 
 #[tauri::command]
@@ -753,38 +1215,64 @@ pub fn get_settings(state: State<'_, AppState>) -> Settings {
 }
 
 /// Swaps the registered global shortcut from `old` to the current setting.
-/// Failing to register (another app owns the keys) is not fatal.
-pub fn apply_shortcut(app: &AppHandle, old: &str) {
+/// Failing to register (another app owns the keys) is not fatal; the error
+/// says so in words the settings view can show.
+pub fn apply_shortcut(app: &AppHandle, old: &str) -> Result<(), String> {
     use tauri_plugin_global_shortcut::GlobalShortcutExt;
     let gs = app.global_shortcut();
     if !old.is_empty() {
         let _ = gs.unregister(old);
     }
     let new = lock(&app.state::<AppState>().settings).shortcut.clone();
-    if !new.is_empty()
-        && let Err(e) = gs.register(new.as_str()) {
-            eprintln!("shortcut {new} unavailable: {e}");
-        }
+    if new.is_empty() {
+        return Ok(());
+    }
+    gs.register(new.as_str()).map_err(|e| {
+        app.state::<AppState>()
+            .log
+            .warn(format!("Shortcut {new} unavailable: {e}"));
+        format!("Saved, but the shortcut {new} isn't available (another app may use it).")
+    })
 }
 
 #[tauri::command]
-pub fn set_settings(app: AppHandle, state: State<'_, AppState>, settings: Settings) -> Result<Settings, String> {
+pub fn set_settings(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    settings: Settings,
+) -> Result<Settings, String> {
     use tauri_plugin_autostart::ManagerExt;
     let new = settings.sanitized();
     let auto = app.autolaunch();
     let currently = auto.is_enabled().unwrap_or(false);
     if new.launch_at_login != currently {
-        let r = if new.launch_at_login { auto.enable() } else { auto.disable() };
-        r.map_err(|e| format!("Couldn't change login item: {e}"))?;
+        let r = if new.launch_at_login {
+            auto.enable()
+        } else {
+            auto.disable()
+        };
+        r.map_err(|e| {
+            state.log.error(format!("Couldn't change login item: {e}"));
+            format!("Couldn't change login item: {e}")
+        })?;
     }
     let (saved, old_shortcut) = {
         let mut s = lock(&state.settings);
+        // Save first: a failed save must not leave unsaved values in use.
+        new.save(&state.settings_path).map_err(|e| {
+            state.log.error(format!("Couldn't save settings: {e}"));
+            format!("Couldn't save settings: {e}")
+        })?;
         let old = std::mem::replace(&mut *s, new);
-        s.save(&state.settings_path).map_err(|e| format!("Couldn't save settings: {e}"))?;
+        if *s != old {
+            state
+                .log
+                .info(format!("Settings changed: {}", settings_line(&s)));
+        }
         (s.clone(), old.shortcut)
     };
     if saved.shortcut != old_shortcut {
-        apply_shortcut(&app, &old_shortcut);
+        apply_shortcut(&app, &old_shortcut)?;
     }
     Ok(saved)
 }
@@ -792,7 +1280,9 @@ pub fn set_settings(app: AppHandle, state: State<'_, AppState>, settings: Settin
 #[cfg(feature = "playground")]
 #[tauri::command]
 pub async fn playground_reset() -> Result<crate::playground::PlaygroundStatus, String> {
-    tauri::async_runtime::spawn_blocking(|| crate::playground_state().reset()).await.map_err(blocking_err)?
+    tauri::async_runtime::spawn_blocking(|| crate::playground_state().reset())
+        .await
+        .map_err(blocking_err)?
 }
 
 #[cfg(feature = "playground")]
@@ -821,7 +1311,12 @@ pub fn hide_panel(app: AppHandle) {
 #[tauri::command]
 pub fn quit_butters(app: AppHandle) {
     let state = app.state::<AppState>();
-    let _ = lock(&state.history).save(&state.history_path);
+    state.log.info("Quit from the panel");
+    crate::json_file::log_save(
+        &state.log,
+        &state.history_path,
+        lock(&state.history).save(&state.history_path),
+    );
     app.exit(0);
 }
 
@@ -833,6 +1328,7 @@ pub fn spawn_background(app: AppHandle) {
         .name("butters-watch".into())
         .spawn(move || {
             let mut tick: u64 = 0;
+            let mut last_level: Option<Level> = None;
             lock(&app.state::<AppState>().sampler).sample();
             // Debug builds only: fire one real alert through the normal path,
             // so tests can see what a notification looks like.
@@ -862,15 +1358,29 @@ pub fn spawn_background(app: AppHandle) {
                     let mut seen = lock(&state.leak_notified);
                     let leaks = t.leaks();
                     seen.retain(|k| leaks.iter().any(|l| (l.pid, l.start) == *k));
-                    leaks.into_iter().filter(|l| seen.insert((l.pid, l.start))).collect::<Vec<_>>()
+                    leaks
+                        .into_iter()
+                        .filter(|l| seen.insert((l.pid, l.start)))
+                        .collect::<Vec<_>>()
                 };
-                if let Some(l) = new_leaks.first()
-                    && lock(&state.settings).alerts && !panel_open {
-                        crate::permissions::notify(
-                            &app,
-                            &format!("{} grew {} in {}", l.label, fmt_bytes(l.growth.bytes), fmt_duration(l.growth.secs.max(60))),
-                        );
+                let alerts_on = lock(&state.settings).alerts;
+                for (i, l) in new_leaks.iter().enumerate() {
+                    let msg = format!(
+                        "{} grew {} in {}",
+                        l.label,
+                        fmt_bytes(l.growth.bytes),
+                        fmt_duration(l.growth.secs.max(60))
+                    );
+                    // One notification per minute at most; the rest are only logged.
+                    let show = i == 0 && alerts_on && !panel_open;
+                    state.log.warn(format!(
+                        "Leak: {msg}{}",
+                        alert_suffix(show, alerts_on, panel_open)
+                    ));
+                    if show {
+                        crate::permissions::notify(&app, &msg);
                     }
+                }
                 // Docker activity every 10 minutes, even with the panel closed,
                 // so "no activity for 6 days" is measured, not guessed.
                 // Docker + Ollama every 10 minutes (and once right after start),
@@ -880,27 +1390,73 @@ pub fn spawn_background(app: AppHandle) {
                     let _ = do_scan_services(&state);
                 }
                 let level = alerts::level(&stats);
+                if last_level != Some(level) {
+                    let name = level_name(level);
+                    state.log.info(format!(
+                        "Machine is {name}: {}, pressure {:?}, thermal {:?}",
+                        summary_line(&stats),
+                        stats.pressure,
+                        stats.thermal
+                    ));
+                    last_level = Some(level);
+                }
                 crate::panel::set_tray_level(&app, level, &stats);
                 {
                     let mut h = lock(&state.history);
                     h.record_level(history::today(), level);
                     // Write at most every ~10 minutes; closes save right away.
                     if tick.is_multiple_of(200) {
-                        let _ = h.save(&state.history_path);
+                        crate::json_file::log_save(
+                            &state.log,
+                            &state.history_path,
+                            h.save(&state.history_path),
+                        );
                     }
                 }
                 let alert = lock(&state.alerts).check(&stats, Instant::now());
-                if let Some((_, msg)) = alert
-                    && lock(&state.settings).alerts && !panel_open {
+                if let Some((_, msg)) = alert {
+                    let show = alerts_on && !panel_open;
+                    state.log.warn(format!(
+                        "Alert: {msg}{}",
+                        alert_suffix(show, alerts_on, panel_open)
+                    ));
+                    if show {
                         crate::permissions::notify(&app, msg);
                     }
+                }
             }
         })
         .expect("spawn background thread");
 }
 
+fn level_name(level: Level) -> &'static str {
+    match level {
+        Level::Smooth => "smooth",
+        Level::Busy => "busy",
+        Level::Strained => "strained",
+    }
+}
+
+/// Why an alert was or wasn't shown, for the log.
+fn alert_suffix(shown: bool, alerts_on: bool, panel_open: bool) -> &'static str {
+    if shown {
+        " (notified)"
+    } else if !alerts_on {
+        " (not notified: alerts are off)"
+    } else if panel_open {
+        " (not notified: panel was open)"
+    } else {
+        " (not notified)"
+    }
+}
+
 pub fn summary_line(stats: &Stats) -> String {
-    format!("Memory {} of {} · CPU {:.0}%", fmt_bytes(stats.mem_used), fmt_bytes(stats.mem_total), stats.cpu)
+    format!(
+        "Memory {} of {} · CPU {:.0}%",
+        fmt_bytes(stats.mem_used),
+        fmt_bytes(stats.mem_total),
+        stats.cpu
+    )
 }
 
 #[cfg(test)]
@@ -929,6 +1485,52 @@ mod tests {
     }
 
     #[test]
+    fn docker_clean_ups_free_disk_not_memory() {
+        let disk = Target::DockerDisk {
+            key: "docker:build-cache".into(),
+            which: DiskWhich::BuildCache,
+        };
+        assert_eq!(disk.memory_kind(), None);
+        let model = Target::Model {
+            key: "ollama:llama3".into(),
+            name: "llama3".into(),
+            memory: MB,
+        };
+        assert_eq!(model.memory_kind(), Some(Kind::OllamaModel));
+        let container = Target::Container {
+            key: "docker:web".into(),
+            id: "abc".into(),
+            name: "web".into(),
+            memory: MB,
+        };
+        assert_eq!(container.memory_kind(), Some(Kind::DockerContainer));
+    }
+
+    #[test]
+    fn auto_remove_containers_are_flagged_and_never_swept() {
+        let idle = crate::docker_activity::Idle {
+            secs: 2 * DAY,
+            lower_bound: false,
+        };
+        let mut c = services::Container {
+            id: "abc".into(),
+            name: "pg".into(),
+            image: "postgres:17".into(),
+            auto_remove: true,
+            ..Default::default()
+        };
+        let rm = container_suggestion(&c, &idle, "d1-0".into(), "docker:pg".into());
+        assert_eq!(rm.note.as_deref(), Some("Stopping deletes it (--rm)"));
+        assert!(!rm.recommended);
+        assert!(!sweepable(&rm));
+        c.auto_remove = false;
+        let kept = container_suggestion(&c, &idle, "d1-0".into(), "docker:pg".into());
+        assert_eq!(kept.note, None);
+        assert!(kept.recommended);
+        assert!(sweepable(&kept));
+    }
+
+    #[test]
     fn many_leftovers_merge_into_one_card() {
         let mut into = leftover(1, 3000, "/a");
         for i in 0..15u32 {
@@ -941,5 +1543,74 @@ mod tests {
         assert_eq!(into.memory, 16 * 30 * MB);
         assert_eq!(into.detail.as_deref(), Some("16 folders"));
         assert_eq!(base_title("Vite ×dev"), "Vite ×dev");
+    }
+
+    fn state_in(name: &str) -> (AppState, PathBuf) {
+        let dir = std::env::temp_dir().join(format!("butters-app-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        (
+            AppState::new(dir.join("settings.json"), Log::disabled()),
+            dir,
+        )
+    }
+
+    fn procs(pid: u32, start: u64) -> Target {
+        Target::Procs {
+            key: "dev:sleeper".into(),
+            kind: Kind::DevServer,
+            target: ProcTarget {
+                title: "sleeper".into(),
+                members: vec![(pid, start)],
+                app_pid: None,
+                memory: 0,
+            },
+        }
+    }
+
+    #[test]
+    fn closing_an_id_the_last_scan_never_gave_is_refused() {
+        let (state, dir) = state_in("unknown");
+        let out = close_target(&state, "nope", true);
+        assert_eq!(
+            out,
+            Outcome::Refused {
+                message: "List changed. Refresh.".into()
+            }
+        );
+        assert_eq!(lock(&state.history).lifetime.closed, 0);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn closing_butters_itself_is_refused_and_the_row_stays() {
+        let (state, dir) = state_in("self");
+        lock(&state.targets).insert("1".into(), procs(std::process::id(), 0));
+        let out = close_target(&state, "1", true);
+        assert!(matches!(out, Outcome::Refused { .. }), "{out:?}");
+        assert!(lock(&state.targets).contains_key("1"));
+        assert_eq!(lock(&state.history).lifetime.closed, 0);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn force_closing_a_listed_process_stops_it_and_counts_it() {
+        let (state, dir) = state_in("force");
+        let (child, start) = actions::tests::spawn_sleeper();
+        let pid = child.id();
+        lock(&state.targets).insert("7".into(), procs(pid, start));
+        let reaper = std::thread::spawn(move || {
+            let mut c = child;
+            let _ = c.wait();
+        });
+        let out = close_target(&state, "7", true);
+        reaper.join().unwrap();
+        assert!(matches!(out, Outcome::Closed { .. }), "{out:?}");
+        assert!(!actions::tests::alive(pid));
+        assert!(!lock(&state.targets).contains_key("7"));
+        let saved = History::load(&state.history_path, &state.log);
+        assert_eq!(saved.lifetime.closed, 1);
+        assert_eq!(saved.lifetime.by_kind["dev_server"], 1);
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

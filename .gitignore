@@ -7,6 +7,17 @@ src-tauri/gen/schemas
 *.log
 *.p12
 *.key
+*.pem
+*.pfx
+*.p8
 .env*
 test-results
 playwright-report
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.swp
+
+# bench kit: raw run data stays local; study definitions, protocols and verdicts are tracked
+bench/studies/*/runs/

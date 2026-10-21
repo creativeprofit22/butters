@@ -4,6 +4,7 @@ Run: python3 scripts/make_icons.py
 Writes src-tauri/icons/app-icon.png (feed to `cargo tauri icon`) and the
 menu bar / tray icons (colour, not template, so they stay butter-coloured).
 """
+
 from pathlib import Path
 
 from PIL import Image, ImageChops, ImageDraw, ImageFilter
@@ -31,8 +32,10 @@ def vgrad(size, top, bottom):
 
 def soften(mask, r):
     """Rounds every corner of a hard mask: blur, then re-threshold at the midpoint."""
-    return mask.filter(ImageFilter.GaussianBlur(r)).point(lambda v: 255 if v > 127 else 0).filter(
-        ImageFilter.GaussianBlur(max(1, r / 6))
+    return (
+        mask.filter(ImageFilter.GaussianBlur(r))
+        .point(lambda v: 255 if v > 127 else 0)
+        .filter(ImageFilter.GaussianBlur(max(1, r / 6)))
     )
 
 
@@ -60,7 +63,11 @@ def pat_layers(s, ox=0.0, oy=0.0, k=1.0, melt=0.0):
     drips_spec = [(0.29, 0.065, 0.13), (0.45, 0.05, 0.075)]
     if melt:
         # melting: longer drips, a third one, and the pat runs into a wider puddle
-        drips_spec = [(0.27, 0.075, 0.13 + 0.12 * melt), (0.44, 0.06, 0.075 + 0.1 * melt), (0.55, 0.05, 0.05 + 0.08 * melt)]
+        drips_spec = [
+            (0.27, 0.075, 0.13 + 0.12 * melt),
+            (0.44, 0.06, 0.075 + 0.1 * melt),
+            (0.55, 0.05, 0.05 + 0.08 * melt),
+        ]
     for x, w, length in drips_spec:
         (x0, y0), (x1, y1) = P(x - w / 2, 0.58), P(x + w / 2, 0.62 + length)
         d.rounded_rectangle([x0, y0, x1, y1], radius=(x1 - x0) / 2, fill=255)
@@ -96,7 +103,11 @@ def draw_pat(base, s, ox=0.0, oy=0.0, k=1.0, round_r=None, outline=0.0, shine=Tr
     base.paste(pal.get("puddle", BUTTER_PUDDLE), (0, 0), melt_mask)
     base.paste(vgrad(base.size, front_c, pal.get("side", BUTTER_SIDE)), (0, 0), ImageChops.multiply(side, body))
     base.paste(vgrad(base.size, pal.get("top", (250, 220, 130)), front_c), (0, 0), ImageChops.multiply(front, body))
-    base.paste(vgrad(base.size, pal.get("top", BUTTER_TOP), pal.get("top", (250, 224, 146))), (0, 0), ImageChops.multiply(top, body))
+    base.paste(
+        vgrad(base.size, pal.get("top", BUTTER_TOP), pal.get("top", (250, 224, 146))),
+        (0, 0),
+        ImageChops.multiply(top, body),
+    )
     base.paste(vgrad(base.size, pal.get("top", (250, 220, 130)), front_c), (0, 0), soften(drips, r * 0.8))
 
     if shine:

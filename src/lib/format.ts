@@ -1,5 +1,3 @@
-
-
 const MB = 1024 * 1024;
 const GB = 1024 * MB;
 
@@ -14,4 +12,3 @@ export function duration(secs: number): string {
   const m = Math.round((secs % 3600) / 60);
   return m === 0 || h >= 10 ? `${h} h` : `${h} h ${m} min`;
 }
-

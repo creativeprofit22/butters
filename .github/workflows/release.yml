@@ -8,15 +8,23 @@ on:
   push:
     tags: ["v*"]
 
-permissions:
-  contents: write
+permissions: {}
 
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
+  # The full CI suite must pass on the tagged commit before anything is built.
+  ci:
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
   build:
+    needs: ci
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       max-parallel: 1 # one at a time, so each job merges cleanly into latest.json
@@ -46,6 +54,25 @@ jobs:
           workspaces: src-tauri
           key: ${{ matrix.target }}
       - run: pnpm install --frozen-lockfile
+      # The release notes are this version's section of CHANGELOG.md.
+      - name: Release notes from CHANGELOG.md
+        id: notes
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          notes=$(awk -v v="$version" '/^## /{p = index($0, "## [" v "]") == 1; next} p' CHANGELOG.md)
+          if [[ -z "${notes//[[:space:]]/}" ]]; then
+            echo "CHANGELOG.md has no section for $version" >&2
+            exit 1
+          fi
+          {
+            echo "body<<BUTTERS_NOTES_EOF"
+            printf '%s\n\n%s\n' "$notes" "Download the .dmg for Mac or the setup .exe for Windows. Installed copies update themselves from here."
+            echo "BUTTERS_NOTES_EOF"
+          } >> "$GITHUB_OUTPUT"
       - uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -62,7 +89,7 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: Butters ${{ github.ref_name }}
-          releaseBody: Download the .dmg for Mac or the setup .exe for Windows. Installed copies update themselves from here.
+          releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: true
           args: --target ${{ matrix.target }}
 
@@ -88,6 +115,8 @@ jobs:
 
   publish:
     needs: build
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
     steps:
       - name: Publish the draft release

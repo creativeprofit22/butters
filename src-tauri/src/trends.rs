@@ -93,7 +93,10 @@ pub fn steady_growth(points: &VecDeque<(u64, u64)>) -> Option<Growth> {
     let (t0, b0) = points.iter().copied().min_by_key(|&(_, b)| b)?;
     let (t1, b1) = *points.back()?;
     let grew = b1.saturating_sub(b0);
-    (grew >= LEAK_GROWTH && t1 > t0).then_some(Growth { bytes: grew, secs: t1 - t0 })
+    (grew >= LEAK_GROWTH && t1 > t0).then_some(Growth {
+        bytes: grew,
+        secs: t1 - t0,
+    })
 }
 
 impl Trends {
@@ -108,8 +111,14 @@ impl Trends {
             if !tracked && r.memory < LEAK_TRACK_MIN {
                 continue;
             }
-            let t = self.mem.entry(key).or_insert_with(|| MemTrack { label: r.label.clone(), points: VecDeque::new() });
-            if t.points.back().is_none_or(|&(at, _)| now.saturating_sub(at) >= CHECKPOINT_SECS) {
+            let t = self.mem.entry(key).or_insert_with(|| MemTrack {
+                label: r.label.clone(),
+                points: VecDeque::new(),
+            });
+            if t.points
+                .back()
+                .is_none_or(|&(at, _)| now.saturating_sub(at) >= CHECKPOINT_SECS)
+            {
                 t.points.push_back((now, r.memory));
                 while t.points.len() > CHECKPOINTS {
                     t.points.pop_front();
@@ -125,7 +134,10 @@ impl Trends {
                 *by_label.entry(r.label.as_str()).or_default() += r.cpu;
             }
         }
-        let mut top: Vec<(String, f32)> = by_label.into_iter().map(|(l, c)| (l.to_string(), c)).collect();
+        let mut top: Vec<(String, f32)> = by_label
+            .into_iter()
+            .map(|(l, c)| (l.to_string(), c))
+            .collect();
         top.sort_by(|a, b| b.1.total_cmp(&a.1));
         top.truncate(CPU_TOP_PER_MINUTE);
         self.minutes.push_back(top);
@@ -135,7 +147,9 @@ impl Trends {
     }
 
     pub fn growth_of(&self, pid: u32, start: u64) -> Option<Growth> {
-        self.mem.get(&(pid, start)).and_then(|t| steady_growth(&t.points))
+        self.mem
+            .get(&(pid, start))
+            .and_then(|t| steady_growth(&t.points))
     }
 
     pub fn leaks(&self) -> Vec<Leak> {
@@ -144,7 +158,13 @@ impl Trends {
             .iter()
             .filter_map(|(&(pid, start), t)| {
                 let growth = steady_growth(&t.points)?;
-                Some(Leak { pid, start, label: t.label.clone(), memory: t.points.back()?.1, growth })
+                Some(Leak {
+                    pid,
+                    start,
+                    label: t.label.clone(),
+                    memory: t.points.back()?.1,
+                    growth,
+                })
             })
             .collect();
         out.sort_by_key(|l| std::cmp::Reverse(l.growth.bytes));
@@ -181,7 +201,13 @@ mod tests {
     use super::*;
 
     fn r(pid: u32, label: &str, memory: u64, cpu: f32) -> Reading {
-        Reading { pid, start: 1, label: label.into(), memory, cpu }
+        Reading {
+            pid,
+            start: 1,
+            label: label.into(),
+            memory,
+            cpu,
+        }
     }
 
     #[test]
@@ -189,7 +215,13 @@ mod tests {
         let mut t = Trends::default();
         for i in 0..7u64 {
             let at = i * CHECKPOINT_SECS;
-            t.record(at, &[r(1, "node", 600 * MB + i * 300 * MB, 5.0), r(2, "Chrome", if i % 2 == 0 { 3 * GB } else { GB }, 2.0)]);
+            t.record(
+                at,
+                &[
+                    r(1, "node", 600 * MB + i * 300 * MB, 5.0),
+                    r(2, "Chrome", if i % 2 == 0 { 3 * GB } else { GB }, 2.0),
+                ],
+            );
         }
         let leaks = t.leaks();
         assert_eq!(leaks.len(), 1);
@@ -229,7 +261,10 @@ mod tests {
     fn culprits_average_over_the_window() {
         let mut t = Trends::default();
         for i in 0..10 {
-            let mut rs = vec![r(1, "Google Chrome", 0, 40.0), r(2, "Google Chrome", 0, 20.0)];
+            let mut rs = vec![
+                r(1, "Google Chrome", 0, 40.0),
+                r(2, "Google Chrome", 0, 20.0),
+            ];
             if i < 5 {
                 rs.push(r(3, "node", 0, 100.0));
             }
@@ -239,12 +274,51 @@ mod tests {
         let (c, minutes) = t.culprits(5);
         assert_eq!(minutes, 10);
         assert_eq!(c[0].label, "Google Chrome");
-        assert!((c[0].avg - 60.0).abs() < 0.01, "helpers add up under one name");
+        assert!(
+            (c[0].avg - 60.0).abs() < 0.01,
+            "helpers add up under one name"
+        );
         assert_eq!(c[1].label, "node");
         assert!((c[1].avg - 50.0).abs() < 0.01);
         assert_eq!(c[1].peak, 100.0);
         assert_eq!(c[1].series.len(), 10);
         assert!(c.iter().all(|x| x.label != "idle"));
+    }
+
+    #[test]
+    fn two_apps_webview2_cpu_is_not_merged() {
+        use crate::engine::assess::reading_labels;
+        use crate::engine::model::ProcInfo;
+        let proc = |pid: u32, parent: u32, exe: &str| ProcInfo {
+            pid,
+            parent: Some(parent),
+            start_time: 1000 + pid as u64,
+            name: exe.rsplit('\\').next().unwrap_or(exe).into(),
+            exe: Some(exe.into()),
+            ..Default::default()
+        };
+        let wv = r"C:\Program Files (x86)\Microsoft\EdgeWebView\Application\130.0.2849.80\msedgewebview2.exe";
+        let procs = [
+            proc(100, 4, r"C:\Program Files\Handy\handy.exe"),
+            proc(101, 100, wv),
+            proc(200, 4, r"C:\Users\me\AppData\Local\Slack\slack.exe"),
+            proc(201, 200, wv),
+            proc(202, 201, wv),
+        ];
+        let labels = reading_labels(&procs);
+        let cpu = [(101, 30.0), (201, 10.0), (202, 15.0)];
+        let mut t = Trends::default();
+        let rs: Vec<Reading> = cpu
+            .iter()
+            .map(|&(pid, c)| r(pid, &labels[&pid], 0, c))
+            .collect();
+        t.record(0, &rs);
+        let (c, _) = t.culprits(5);
+        assert!(c.iter().all(|x| !x.label.contains("msedgewebview2")));
+        assert_eq!(c.len(), 2);
+        assert!((c[0].avg - 30.0).abs() < 0.01);
+        assert!((c[1].avg - 25.0).abs() < 0.01);
+        assert_ne!(c[0].label, c[1].label);
     }
 
     #[test]

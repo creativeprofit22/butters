@@ -5,6 +5,7 @@ Writes src-tauri/icons/dmg-background.png at 2x with 144 DPI, so Finder shows it
 crisp on Retina at 640 x 400 points. Icon spots must match tauri.conf.json:
 app at (170, 250), Applications at (470, 250).
 """
+
 import io
 import math
 from pathlib import Path
@@ -16,10 +17,10 @@ ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "src-tauri" / "icons" / "dmg-background.png"
 WOFF2 = ROOT / "node_modules/@fontsource-variable/sora/files/sora-latin-wght-normal.woff2"
 
-W, H = 640, 400          # window content, in points
-SCALE = 2                # output pixels per point (Retina)
-SS = 3                   # extra supersampling for smooth curves
-K = SCALE * SS           # drawing units per point
+W, H = 640, 400  # window content, in points
+SCALE = 2  # output pixels per point (Retina)
+SS = 3  # extra supersampling for smooth curves
+K = SCALE * SS  # drawing units per point
 
 CREAM = (250, 246, 236)
 CREAM_DEEP = (243, 236, 220)
@@ -73,8 +74,19 @@ def drips_mask():
     band = 30
     d.rectangle([0, 0, W * K, band * K], fill=255)
     # (x centre, width, length below the band), in points. Hand-placed so it reads as melting, not a pattern.
-    drips = [(38, 26, 22), (92, 18, 44), (140, 30, 16), (205, 22, 62), (262, 34, 26), (318, 20, 40),
-             (372, 28, 18), (430, 22, 70), (486, 30, 24), (540, 18, 46), (596, 28, 20)]
+    drips = [
+        (38, 26, 22),
+        (92, 18, 44),
+        (140, 30, 16),
+        (205, 22, 62),
+        (262, 34, 26),
+        (318, 20, 40),
+        (372, 28, 18),
+        (430, 22, 70),
+        (486, 30, 24),
+        (540, 18, 46),
+        (596, 28, 20),
+    ]
     for x, w, length in drips:
         r = w / 2
         top = band - 6
@@ -96,7 +108,10 @@ def drips_mask():
 def drop(d, x, y, r):
     """Teardrop: circle with a point on top."""
     d.ellipse([(x - r) * K, (y - r) * K, (x + r) * K, (y + r) * K], fill=255)
-    d.polygon([((x - r * 0.82) * K, (y - r * 0.5) * K), (x * K, (y - r * 2.3) * K), ((x + r * 0.82) * K, (y - r * 0.5) * K)], fill=255)
+    d.polygon(
+        [((x - r * 0.82) * K, (y - r * 0.5) * K), (x * K, (y - r * 2.3) * K), ((x + r * 0.82) * K, (y - r * 0.5) * K)],
+        fill=255,
+    )
 
 
 def arc_points(p0, p1, lift, n=80):

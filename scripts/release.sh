@@ -14,6 +14,19 @@ if [[ -n "$(git status --porcelain)" ]]; then
   echo "Commit or stash your changes first." >&2
   exit 1
 fi
+if [[ "$(git rev-parse --abbrev-ref HEAD)" != "main" ]]; then
+  echo "Release from main." >&2
+  exit 1
+fi
+git fetch --quiet origin main
+if [[ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]]; then
+  echo "main is not in sync with origin/main. Pull or push first." >&2
+  exit 1
+fi
+if ! grep -qF "## [$version]" CHANGELOG.md; then
+  echo "Add a '## [$version] - YYYY-MM-DD' section to CHANGELOG.md first." >&2
+  exit 1
+fi
 
 python3 - "$version" <<'PY'
 import json, re, sys
@@ -29,7 +42,12 @@ toml = re.sub(r'(?m)^version = "[^"]+"', f'version = "{v}"', toml, count=1)
 open("src-tauri/Cargo.toml", "w").write(toml)
 PY
 
-(cd src-tauri && cargo update -p butters --offline >/dev/null 2>&1 || cargo update -p butters >/dev/null)
+(
+  cd src-tauri
+  if ! cargo update -p butters --offline >/dev/null 2>&1; then
+    cargo update -p butters >/dev/null
+  fi
+)
 git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock
 git commit -m "Release v$version"
 git tag "v$version"

@@ -7,14 +7,30 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, Uid, UpdateKind};
 
-use crate::engine::classify::{app_name, app_root};
+use crate::engine::assess::reading_labels;
 use crate::engine::model::ProcInfo;
-use crate::trends::Reading;
 use crate::platform::{self, Pressure, Thermal};
+use crate::trends::Reading;
 
 /// A process counts as active when it used at least this much of one core
 /// on average since the previous sample.
 const ACTIVE_CPU_PCT: f32 = 2.0;
+
+/// Gap between the two readings a first snapshot needs for CPU use.
+pub const WARM_UP: Duration = Duration::from_millis(500);
+
+/// What a scan's snapshot reads per process. Exe, command line, folder and
+/// owner are fetched once per process, then reused.
+fn snapshot_kind() -> ProcessRefreshKind {
+    ProcessRefreshKind::nothing()
+        .with_cpu()
+        .with_memory()
+        .with_exe(UpdateKind::OnlyIfNotSet)
+        .with_cmd(UpdateKind::OnlyIfNotSet)
+        .with_cwd(UpdateKind::OnlyIfNotSet)
+        .with_user(UpdateKind::OnlyIfNotSet)
+        .without_tasks()
+}
 
 struct Activity {
     cpu_ms: u64,
@@ -74,13 +90,31 @@ impl Sampler {
                 .without_tasks(),
         );
         if self.my_uid.is_none() {
-            self.my_uid = self.sys.process(Pid::from_u32(self.self_pid)).and_then(|p| p.user_id().cloned());
+            self.my_uid = self
+                .sys
+                .process(Pid::from_u32(self.self_pid))
+                .and_then(|p| p.user_id().cloned());
         }
     }
 
     /// The user's own processes as of the last refresh, for leak watch and
     /// the fan view. App helpers are labelled with their app's name.
     pub fn readings(&self) -> Vec<Reading> {
+        // Every process, not only the user's, so ownership chains are whole.
+        let tree: Vec<ProcInfo> = self
+            .sys
+            .processes()
+            .iter()
+            .map(|(pid, p)| ProcInfo {
+                pid: pid.as_u32(),
+                parent: p.parent().map(|pp| pp.as_u32()),
+                start_time: p.start_time(),
+                name: p.name().to_string_lossy().into_owned(),
+                exe: p.exe().map(|e| e.to_string_lossy().into_owned()),
+                ..Default::default()
+            })
+            .collect();
+        let mut labels = reading_labels(&tree);
         let mut out = Vec::new();
         for (pid, p) in self.sys.processes() {
             let owned = matches!((&self.my_uid, p.user_id()), (Some(me), Some(them)) if me == them);
@@ -89,20 +123,24 @@ impl Sampler {
             }
             let key = (pid.as_u32(), p.start_time());
             let cpu = self.activity.get(&key).map(|a| a.cpu_pct).unwrap_or(0.0);
-            let label = p
-                .exe()
-                .map(|e| e.to_string_lossy().into_owned())
-                .and_then(|e| app_root(&e))
-                .map(|root| app_name(&root))
+            let label = labels
+                .remove(&key.0)
                 .unwrap_or_else(|| p.name().to_string_lossy().into_owned());
             let memory = platform::footprint(key.0).unwrap_or_else(|| p.memory());
-            out.push(Reading { pid: key.0, start: key.1, label, memory, cpu });
+            out.push(Reading {
+                pid: key.0,
+                start: key.1,
+                label,
+                memory,
+                cpu,
+            });
         }
         out
     }
 
     fn refresh(&mut self, kind: ProcessRefreshKind) {
-        self.sys.refresh_processes_specifics(ProcessesToUpdate::All, true, kind);
+        self.sys
+            .refresh_processes_specifics(ProcessesToUpdate::All, true, kind);
         self.sys.refresh_memory();
         self.sys.refresh_cpu_usage();
         let now = Instant::now();
@@ -126,7 +164,13 @@ impl Sampler {
                 None => {
                     self.activity.insert(
                         key,
-                        Activity { cpu_ms, at: now, cpu_pct: 0.0, last_active: None, first_seen: now },
+                        Activity {
+                            cpu_ms,
+                            at: now,
+                            cpu_pct: 0.0,
+                            last_active: None,
+                            first_seen: now,
+                        },
                     );
                 }
             }
@@ -134,27 +178,34 @@ impl Sampler {
         self.activity.retain(|k, _| seen.contains(k));
     }
 
+    /// Whether the next snapshot needs a first reading `WARM_UP` before it
+    /// (CPU use needs two readings some time apart).
+    pub fn needs_warm_up(&self) -> bool {
+        self.last_refresh
+            .is_none_or(|t| t.elapsed() < Duration::from_millis(300))
+    }
+
+    /// Takes that first reading. Callers holding the sampler behind a lock
+    /// should release it while they wait `WARM_UP`, so others aren't stalled.
+    pub fn warm_up(&mut self) {
+        self.refresh(snapshot_kind());
+    }
+
     /// Full picture for a scan: adds command lines, folders and owners, and
     /// combines CPU history with terminal activity into an idle time.
     pub fn snapshot(&mut self, ports: &HashMap<u32, Vec<u16>>) -> Vec<ProcInfo> {
-        let first = self.last_refresh.is_none();
-        let kind = ProcessRefreshKind::nothing()
-            .with_cpu()
-            .with_memory()
-            .with_exe(UpdateKind::OnlyIfNotSet)
-            .with_cmd(UpdateKind::OnlyIfNotSet)
-            .with_cwd(UpdateKind::OnlyIfNotSet)
-            .with_user(UpdateKind::OnlyIfNotSet)
-            .without_tasks();
-        if first || self.last_refresh.is_some_and(|t| t.elapsed() < Duration::from_millis(300)) {
+        if self.needs_warm_up() {
             // CPU use needs two readings; take a short second one on first use.
-            self.refresh(kind);
-            std::thread::sleep(Duration::from_millis(500));
+            self.warm_up();
+            std::thread::sleep(WARM_UP);
         }
-        self.refresh(kind);
+        self.refresh(snapshot_kind());
 
         if self.my_uid.is_none() {
-            self.my_uid = self.sys.process(Pid::from_u32(self.self_pid)).and_then(|p| p.user_id().cloned());
+            self.my_uid = self
+                .sys
+                .process(Pid::from_u32(self.self_pid))
+                .and_then(|p| p.user_id().cloned());
         }
         let pids: Vec<u32> = self.sys.processes().keys().map(|p| p.as_u32()).collect();
         let tty_idle = platform::terminal_idle(&pids);
@@ -167,7 +218,11 @@ impl Sampler {
             let (cpu, idle, lower_bound) = match self.activity.get(&key) {
                 Some(a) => {
                     let since = a.last_active.unwrap_or(a.first_seen);
-                    (a.cpu_pct, now.duration_since(since).as_secs(), a.last_active.is_none())
+                    (
+                        a.cpu_pct,
+                        now.duration_since(since).as_secs(),
+                        a.last_active.is_none(),
+                    )
                 }
                 None => (0.0, 0, true),
             };
@@ -188,7 +243,12 @@ impl Sampler {
                 start_time: p.start_time(),
                 name: p.name().to_string_lossy().into_owned(),
                 exe: p.exe().map(|e| e.to_string_lossy().into_owned()),
-                cmd: p.cmd().iter().take(8).map(|a| a.to_string_lossy().into_owned()).collect(),
+                cmd: p
+                    .cmd()
+                    .iter()
+                    .take(8)
+                    .map(|a| a.to_string_lossy().into_owned())
+                    .collect(),
                 cwd: p.cwd().map(|c| c.to_string_lossy().into_owned()),
                 memory: platform::footprint(pid).unwrap_or_else(|| p.memory()),
                 cpu,
@@ -203,7 +263,9 @@ impl Sampler {
         // Virtual machines run as system services; count them under the app
         // that started them (Docker Desktop's VM holds most of its memory).
         for p in out.iter_mut() {
-            if p.name.starts_with("com.apple.Virtualization.VirtualMachine") {
+            if p.name
+                .starts_with("com.apple.Virtualization.VirtualMachine")
+            {
                 p.responsible = platform::responsible_pid(p.pid);
             }
         }

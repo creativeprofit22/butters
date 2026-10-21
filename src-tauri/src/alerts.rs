@@ -34,13 +34,19 @@ pub enum Level {
 }
 
 fn mem_ratio(s: &Stats) -> f64 {
-    if s.mem_total == 0 { 0.0 } else { s.mem_used as f64 / s.mem_total as f64 }
+    if s.mem_total == 0 {
+        0.0
+    } else {
+        s.mem_used as f64 / s.mem_total as f64
+    }
 }
 
 pub fn level(s: &Stats) -> Level {
     let ratio = mem_ratio(s);
-    let mem_bad = s.pressure == Pressure::Critical || (s.pressure == Pressure::Unknown && ratio >= 0.92);
-    let mem_warn = s.pressure == Pressure::Warn || (s.pressure == Pressure::Unknown && ratio >= 0.85);
+    let mem_bad =
+        s.pressure == Pressure::Critical || (s.pressure == Pressure::Unknown && ratio >= 0.92);
+    let mem_warn =
+        s.pressure == Pressure::Warn || (s.pressure == Pressure::Unknown && ratio >= 0.85);
     if mem_bad || matches!(s.thermal, Thermal::Serious | Thermal::Critical) || s.cpu >= 85.0 {
         Level::Strained
     } else if mem_warn || s.thermal == Thermal::Fair || s.cpu >= 60.0 {
@@ -60,8 +66,16 @@ impl AlertState {
             Pressure::Unknown if ratio >= 0.92 => 1,
             _ => 0,
         };
-        self.mem_streak = if mem_now > 0 { self.mem_streak + mem_now } else { 0 };
-        self.cpu_streak = if s.cpu >= 85.0 { self.cpu_streak + 1 } else { 0 };
+        self.mem_streak = if mem_now > 0 {
+            self.mem_streak + mem_now
+        } else {
+            0
+        };
+        self.cpu_streak = if s.cpu >= 85.0 {
+            self.cpu_streak + 1
+        } else {
+            0
+        };
 
         let candidates = [
             (
@@ -81,7 +95,12 @@ impl AlertState {
             ),
         ];
         for (hit, kind, msg) in candidates {
-            if hit && self.last.get(&kind).is_none_or(|t| now.duration_since(*t) >= COOLDOWN) {
+            if hit
+                && self
+                    .last
+                    .get(&kind)
+                    .is_none_or(|t| now.duration_since(*t) >= COOLDOWN)
+            {
                 self.last.insert(kind, now);
                 return Some((kind, msg));
             }
@@ -95,7 +114,15 @@ mod tests {
     use super::*;
 
     fn stats(cpu: f32, pressure: Pressure, thermal: Thermal) -> Stats {
-        Stats { mem_used: 8, mem_total: 16, swap_used: 0, cpu, cores: 8, pressure, thermal }
+        Stats {
+            mem_used: 8,
+            mem_total: 16,
+            swap_used: 0,
+            cpu,
+            cores: 8,
+            pressure,
+            thermal,
+        }
     }
 
     #[test]
@@ -103,9 +130,18 @@ mod tests {
         let mut a = AlertState::default();
         let t = Instant::now();
         for i in 0..10 {
-            assert!(a.check(&stats(20.0, Pressure::Normal, Thermal::Nominal), t + Duration::from_secs(60 * i)).is_none());
+            assert!(
+                a.check(
+                    &stats(20.0, Pressure::Normal, Thermal::Nominal),
+                    t + Duration::from_secs(60 * i)
+                )
+                .is_none()
+            );
         }
-        assert_eq!(level(&stats(20.0, Pressure::Normal, Thermal::Nominal)), Level::Smooth);
+        assert_eq!(
+            level(&stats(20.0, Pressure::Normal, Thermal::Nominal)),
+            Level::Smooth
+        );
     }
 
     #[test]
@@ -114,15 +150,32 @@ mod tests {
         let t = Instant::now();
         let warn = stats(20.0, Pressure::Warn, Thermal::Nominal);
         assert!(a.check(&warn, t).is_none());
-        assert_eq!(a.check(&warn, t + Duration::from_secs(60)).unwrap().0, AlertKind::Memory);
-        assert!(a.check(&warn, t + Duration::from_secs(120)).is_none(), "cooldown");
-        assert!(a.check(&warn, t + Duration::from_secs(31 * 60)).is_some(), "after cooldown");
+        assert_eq!(
+            a.check(&warn, t + Duration::from_secs(60)).unwrap().0,
+            AlertKind::Memory
+        );
+        assert!(
+            a.check(&warn, t + Duration::from_secs(120)).is_none(),
+            "cooldown"
+        );
+        assert!(
+            a.check(&warn, t + Duration::from_secs(31 * 60)).is_some(),
+            "after cooldown"
+        );
     }
 
     #[test]
     fn critical_memory_alerts_at_once() {
         let mut a = AlertState::default();
-        assert_eq!(a.check(&stats(20.0, Pressure::Critical, Thermal::Nominal), Instant::now()).unwrap().0, AlertKind::Memory);
+        assert_eq!(
+            a.check(
+                &stats(20.0, Pressure::Critical, Thermal::Nominal),
+                Instant::now()
+            )
+            .unwrap()
+            .0,
+            AlertKind::Memory
+        );
     }
 
     #[test]
@@ -132,7 +185,10 @@ mod tests {
         let hot = stats(95.0, Pressure::Normal, Thermal::Nominal);
         assert!(a.check(&hot, t).is_none());
         assert!(a.check(&hot, t + Duration::from_secs(60)).is_none());
-        assert_eq!(a.check(&hot, t + Duration::from_secs(120)).unwrap().0, AlertKind::Cpu);
+        assert_eq!(
+            a.check(&hot, t + Duration::from_secs(120)).unwrap().0,
+            AlertKind::Cpu
+        );
         assert_eq!(level(&hot), Level::Strained);
     }
 

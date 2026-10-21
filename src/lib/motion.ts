@@ -2,8 +2,9 @@
 // settle), dissolve in place, or melt out: they hold their shape for a
 // moment, then slump, spread and sink before they soften away. Only
 // opacity, filter and transform animate.
-import { prefersReducedMotion } from "svelte/motion";
+
 import { backOut, quintOut } from "svelte/easing";
+import { prefersReducedMotion } from "svelte/motion";
 import type { TransitionConfig } from "svelte/transition";
 
 const still = () => prefersReducedMotion.current;

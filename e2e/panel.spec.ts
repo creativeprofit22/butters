@@ -1,8 +1,8 @@
 // End-to-end tests of the Butters panel. The real built panel runs in
 // WebKit (the engine the macOS app uses) and Chromium (close to Windows'
 // WebView2), against a fake backend that records every command.
-import { expect, test, type Page } from "@playwright/test";
-import { installFakeBackend, type FakeState } from "./backend";
+import { expect, type Page, test } from "@playwright/test";
+import { type FakeState, installFakeBackend } from "./backend";
 
 async function open(page: Page, init: Partial<FakeState> & { suggestions?: unknown[] } = {}) {
   await page.addInitScript(installFakeBackend, init);
@@ -157,7 +157,9 @@ test.describe("permissions and updates", () => {
   });
 
   test("update ready: banner and settings both install it", async ({ page }) => {
-    await open(page, { update: { current: "0.1.0", available: "0.2.0", checking: false, installing: false, error: null } });
+    await open(page, {
+      update: { current: "0.1.0", available: "0.2.0", checking: false, installing: false, error: null },
+    });
     await expect(page.getByText("Update 0.2.0 ready")).toBeVisible();
     await page.getByRole("button", { name: "Update", exact: true }).click();
     await expect.poll(async () => (await fake(page)).calls.some((c) => c.cmd === "install_update")).toBe(true);
@@ -204,7 +206,18 @@ test.describe("protected and leaving", () => {
 
   test("locked protected items have no Close button", async ({ page }) => {
     await open(page, {
-      protectedItems: [{ id: null, key: "self", verb: "Quit", title: "GG Coder", kind: "app", memory: 2 * 1024 ** 3, cpu: 3, reason: "Launched Butters" }],
+      protectedItems: [
+        {
+          id: null,
+          key: "self",
+          verb: "Quit",
+          title: "GG Coder",
+          kind: "app",
+          memory: 2 * 1024 ** 3,
+          cpu: 3,
+          reason: "Launched Butters",
+        },
+      ],
     } as any);
     await page.getByRole("button", { name: /Protected/ }).click();
     const row = page.locator(".protected li", { hasText: "GG Coder" });
@@ -234,17 +247,36 @@ test.describe("protected and leaving", () => {
 test.describe("closing several at once", () => {
   const MB = 1024 ** 2;
   const mk = (id: string, title: string, mem: number) => ({
-    id, key: `k:${id}`, kind: "dev_server", title, detail: "~/x", reason: "Terminal closed", note: null,
-    memory: mem * MB, cpu: 0, ports: [], recommended: true, polite: true, verb: "Stop", disk: 0,
+    id,
+    key: `k:${id}`,
+    kind: "dev_server",
+    title,
+    detail: "~/x",
+    reason: "Terminal closed",
+    note: null,
+    memory: mem * MB,
+    cpu: 0,
+    ports: [],
+    recommended: true,
+    polite: true,
+    verb: "Stop",
+    disk: 0,
   });
-  const four = [mk("a", "Vite dev server", 400), mk("b", "Next.js dev server", 700), mk("c", "Storybook dev server", 300), mk("d", "Expo dev server", 500)];
+  const four = [
+    mk("a", "Vite dev server", 400),
+    mk("b", "Next.js dev server", 700),
+    mk("c", "Storybook dev server", 300),
+    mk("d", "Expo dev server", 500),
+  ];
 
   test("the panel is held open for the whole close, then let go", async ({ page }) => {
     await open(page, { suggestions: four, sweep: [] } as any);
     await page.getByRole("button", { name: "Close 4" }).click();
     await page.getByRole("button", { name: "Close", exact: true }).click();
     await expect(page.locator(".osd")).toBeVisible();
-    await expect.poll(async () => (await fake(page)).calls.filter((c) => c.cmd === "hold_panel").length, { timeout: 5000 }).toBe(2);
+    await expect
+      .poll(async () => (await fake(page)).calls.filter((c) => c.cmd === "hold_panel").length, { timeout: 5000 })
+      .toBe(2);
     const calls = (await fake(page)).calls.map((c) => (c.cmd === "hold_panel" ? `hold:${(c.args as any).on}` : c.cmd));
     const first = calls.indexOf("hold:true");
     const last = calls.lastIndexOf("hold:false");
@@ -265,12 +297,19 @@ test.describe("closing several at once", () => {
     await expect(page.locator(".session-puddle")).toHaveCount(0);
     await expect(page.getByText("Nothing to close")).toBeVisible();
     // No butter-coloured element is lying around between the list and the footer.
-    const leftovers = await page.evaluate(() =>
-      [...document.querySelectorAll<HTMLElement>(".scroll *, .bar > *")].filter((el) => {
-        const cs = getComputedStyle(el);
-        const r = el.getBoundingClientRect();
-        return r.height > 0 && r.height < 10 && r.width > 60 && Number(cs.opacity) > 0.05 && /rgb\(2[34]\d, 2[01]\d, 1[0-4]\d\)/.test(cs.backgroundColor + cs.backgroundImage);
-      }).length,
+    const leftovers = await page.evaluate(
+      () =>
+        [...document.querySelectorAll<HTMLElement>(".scroll *, .bar > *")].filter((el) => {
+          const cs = getComputedStyle(el);
+          const r = el.getBoundingClientRect();
+          return (
+            r.height > 0 &&
+            r.height < 10 &&
+            r.width > 60 &&
+            Number(cs.opacity) > 0.05 &&
+            /rgb\(2[34]\d, 2[01]\d, 1[0-4]\d\)/.test(cs.backgroundColor + cs.backgroundImage)
+          );
+        }).length,
     );
     expect(leftovers).toBe(0);
   });
@@ -279,29 +318,48 @@ test.describe("closing several at once", () => {
 test.describe("closing feels instant", () => {
   const MB = 1024 ** 2;
   const mk = (id: string, title: string) => ({
-    id, key: `k:${id}`, kind: "dev_server", title, detail: "~/x", reason: "Terminal closed", note: null,
-    memory: 200 * MB, cpu: 0, ports: [], recommended: true, polite: true, verb: "Stop", disk: 0,
+    id,
+    key: `k:${id}`,
+    kind: "dev_server",
+    title,
+    detail: "~/x",
+    reason: "Terminal closed",
+    note: null,
+    memory: 200 * MB,
+    cpu: 0,
+    ports: [],
+    recommended: true,
+    polite: true,
+    verb: "Stop",
+    disk: 0,
   });
 
   test("rows warm the moment Close is pressed, and close in parallel", async ({ page }) => {
     await open(page, { suggestions: [mk("a", "Vite"), mk("b", "Next"), mk("c", "Storybook")], sweep: [] } as any);
-    // Make every close take 600 ms, like a real app quitting.
+    // Hold every close until the test lets go, like a real app quitting, and
+    // count how many are in flight. No wall-clock timing: it flaked under load.
     await page.evaluate(() => {
-      const i = (window as any).__TAURI_INTERNALS__;
+      const w = window as any;
+      const i = w.__TAURI_INTERNALS__;
       const o = i.invoke;
+      w.__inFlight = 0;
+      w.__closeGate = new Promise<void>((r) => (w.__openGate = r));
       i.invoke = async (c: string, a: unknown) => {
-        if (c === "close_item") await new Promise((r) => setTimeout(r, 600));
+        if (c === "close_item") {
+          w.__inFlight++;
+          await w.__closeGate;
+        }
         return o(c, a);
       };
     });
     await page.getByRole("button", { name: "Close 3" }).click();
-    const t0 = Date.now();
     await page.getByRole("button", { name: "Close", exact: true }).click();
-    // Instant feedback: all three rows are warm within a frame or two.
-    await expect(page.locator(".row.pending")).toHaveCount(3, { timeout: 150 });
-    // Parallel: all three are melting well before 3 × 600 ms.
-    await expect.poll(() => page.locator(".pat.melting").count(), { timeout: 1500 }).toBeGreaterThan(0);
-    expect(Date.now() - t0).toBeLessThan(1400);
+    // Instant feedback: all three rows are warm while no close has finished.
+    await expect(page.locator(".row.pending")).toHaveCount(3);
+    // Parallel: all three closes are under way at once, not one after another.
+    await expect.poll(() => page.evaluate(() => (window as any).__inFlight)).toBe(3);
+    await page.evaluate(() => (window as any).__openGate());
+    await expect.poll(() => page.locator(".pat.melting").count()).toBeGreaterThan(0);
   });
 
   test("no CSS blur filters on list rows (WebKit draws a magenta edge on them)", async ({ page }) => {
@@ -309,10 +367,11 @@ test.describe("closing feels instant", () => {
     await page.getByRole("button", { name: "Close 2" }).click();
     await page.getByRole("button", { name: "Close", exact: true }).click();
     for (let i = 0; i < 10; i++) {
-      const blurred = await page.evaluate(() =>
-        [...document.querySelectorAll<HTMLElement>(".list li, .list li *, .protected li, .protected li *")].filter((el) =>
-          /blur/.test(getComputedStyle(el).filter),
-        ).length,
+      const blurred = await page.evaluate(
+        () =>
+          [...document.querySelectorAll<HTMLElement>(".list li, .list li *, .protected li, .protected li *")].filter(
+            (el) => /blur/.test(getComputedStyle(el).filter),
+          ).length,
       );
       expect(blurred).toBe(0);
       await page.waitForTimeout(120);

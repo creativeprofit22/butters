@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { Outcome, Suggestion } from "./api";
-  import { bytes } from "./format";
   import Check from "./Check.svelte";
+  import { bytes } from "./format";
   import Icon from "./Icon.svelte";
   import { dissolve, pour } from "./motion";
   import { shortList, tip } from "./tip";
