@@ -38,8 +38,8 @@ impl Settings {
         config_dir.join("settings.json")
     }
 
-    pub fn load(path: &Path) -> Settings {
-        crate::json_file::read::<Settings>(path, 1024 * 1024)
+    pub fn load(path: &Path, log: &crate::log::Log) -> Settings {
+        crate::json_file::read::<Settings>(path, 1024 * 1024, log)
             .map(Settings::sanitized)
             .unwrap_or_default()
     }
@@ -76,7 +76,10 @@ mod tests {
     fn round_trip_and_defaults() {
         let dir = std::env::temp_dir().join(format!("butters-test-{}", std::process::id()));
         let path = Settings::path(&dir);
-        assert_eq!(Settings::load(&path), Settings::default());
+        assert_eq!(
+            Settings::load(&path, &crate::log::Log::disabled()),
+            Settings::default()
+        );
         let s = Settings {
             alerts: false,
             launch_at_login: true,
@@ -85,13 +88,16 @@ mod tests {
             ignored: vec!["app:/x".into()],
         };
         s.save(&path).unwrap();
-        assert_eq!(Settings::load(&path), s);
+        assert_eq!(Settings::load(&path, &crate::log::Log::disabled()), s);
         std::fs::write(&path, b"{not json").unwrap();
-        assert_eq!(Settings::load(&path), Settings::default());
+        assert_eq!(
+            Settings::load(&path, &crate::log::Log::disabled()),
+            Settings::default()
+        );
         // Missing fields fall back to defaults.
         std::fs::write(&path, br#"{"alerts": false}"#).unwrap();
         assert_eq!(
-            Settings::load(&path),
+            Settings::load(&path, &crate::log::Log::disabled()),
             Settings {
                 alerts: false,
                 ..Settings::default()

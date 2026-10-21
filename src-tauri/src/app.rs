@@ -17,6 +17,7 @@ use crate::docker_activity::Activity;
 use crate::engine::assess::{self, Context, Verdict, fmt_bytes, fmt_duration};
 use crate::engine::model::{Group, Kind};
 use crate::history::{self, History, Summary};
+use crate::log::Log;
 use crate::platform;
 use crate::sampler::{self, Sampler, Stats};
 use crate::services;
@@ -118,6 +119,16 @@ impl Target {
             Target::DockerDisk { .. } => None,
         }
     }
+
+    /// What the log calls it (the same name the panel showed).
+    fn label(&self) -> String {
+        match self {
+            Target::Procs { target, .. } => target.title.clone(),
+            Target::Container { name, .. } => format!("Container: {name}"),
+            Target::Model { name, .. } => format!("Ollama model: {name}"),
+            Target::DockerDisk { key, .. } => key.clone(),
+        }
+    }
 }
 
 pub struct AppState {
@@ -147,29 +158,36 @@ pub struct AppState {
     pub alerts: Mutex<AlertState>,
     pub panel_open: AtomicBool,
     seq: AtomicU64,
+    pub log: Log,
+    /// What the log last said each list held (key -> title), so it only
+    /// notes what appeared or went away, not every refresh.
+    logged_procs: Mutex<HashMap<String, String>>,
+    logged_services: Mutex<HashMap<String, String>>,
 }
 
 impl AppState {
-    pub fn new(settings_path: PathBuf) -> Self {
+    pub fn new(settings_path: PathBuf, log: Log) -> Self {
         let dir = settings_path
             .parent()
             .unwrap_or(std::path::Path::new("."))
             .to_path_buf();
         let history_path = History::path(&dir);
         let docker_activity_path = Activity::path(&dir);
+        let settings = Settings::load(&settings_path, &log);
+        log.info(format!("Settings: {}", settings_line(&settings)));
         AppState {
             sampler: Mutex::new(Sampler::new()),
             front: Mutex::new(FrontTracker::new()),
             targets: Mutex::new(HashMap::new()),
-            settings: Mutex::new(Settings::load(&settings_path)),
-            history: Mutex::new(History::load(&history_path)),
+            settings: Mutex::new(settings),
+            history: Mutex::new(History::load(&history_path, &log)),
             history_path,
             settings_path,
             started: Instant::now(),
             containers: Mutex::new(None),
             containers_all_idle: Mutex::new(None),
             trends: Mutex::new(Trends::default()),
-            docker_activity: Mutex::new(Activity::load(&docker_activity_path)),
+            docker_activity: Mutex::new(Activity::load(&docker_activity_path, &log)),
             docker_activity_path,
             leak_notified: Mutex::new(HashSet::new()),
             sweepable: Mutex::new(Vec::new()),
@@ -178,7 +196,91 @@ impl AppState {
             alerts: Mutex::new(AlertState::default()),
             panel_open: AtomicBool::new(false),
             seq: AtomicU64::new(1),
+            log,
+            logged_procs: Mutex::new(HashMap::new()),
+            logged_services: Mutex::new(HashMap::new()),
         }
+    }
+}
+
+fn on_off(b: bool) -> &'static str {
+    if b { "on" } else { "off" }
+}
+
+fn settings_line(s: &Settings) -> String {
+    let shortcut = if s.shortcut.is_empty() {
+        "off"
+    } else {
+        s.shortcut.as_str()
+    };
+    format!(
+        "alerts {}, sounds {}, launch at login {}, shortcut {shortcut}, {} ignored",
+        on_off(s.alerts),
+        on_off(s.sounds),
+        on_off(s.launch_at_login),
+        s.ignored.len()
+    )
+}
+
+fn kind_name(kind: Kind) -> String {
+    serde_json::to_value(kind)
+        .ok()
+        .and_then(|v| v.as_str().map(str::to_string))
+        .unwrap_or_default()
+}
+
+/// Logs what's new in a list since the last time it was logged, and what
+/// went away. Unchanged items stay silent.
+fn log_list_changes(
+    log: &Log,
+    logged: &Mutex<HashMap<String, String>>,
+    suggestions: &[Suggestion],
+) {
+    let mut logged = lock(logged);
+    let now: HashMap<String, String> = suggestions
+        .iter()
+        .map(|s| (s.key.clone(), s.title.clone()))
+        .collect();
+    let mut gone: Vec<&String> = logged
+        .iter()
+        .filter(|(k, _)| !now.contains_key(*k))
+        .map(|(_, t)| t)
+        .collect();
+    gone.sort();
+    for title in gone {
+        log.info(format!("No longer suggesting \"{title}\""));
+    }
+    for s in suggestions.iter().filter(|s| !logged.contains_key(&s.key)) {
+        let size = if s.disk > 0 {
+            format!("{} disk", fmt_bytes(s.disk))
+        } else {
+            fmt_bytes(s.memory)
+        };
+        log.info(format!(
+            "Suggesting \"{}\" ({}): {}, {size}, CPU {:.0}%{}{}",
+            s.title,
+            kind_name(s.kind),
+            s.reason,
+            s.cpu,
+            if s.recommended { ", pre-ticked" } else { "" },
+            s.note
+                .as_deref()
+                .map(|n| format!(", note: {n}"))
+                .unwrap_or_default(),
+        ));
+    }
+    *logged = now;
+}
+
+/// How a close went, for the log.
+fn outcome_entry(outcome: &Outcome) -> (crate::log::Level, &'static str, &str) {
+    use crate::log::Level as L;
+    match outcome {
+        Outcome::Closed { message, .. } => (L::Info, "Closed", message),
+        Outcome::StillRunning { message } => (L::Warn, "Still running after asking", message),
+        Outcome::NeedsForce { message } => (L::Warn, "Needs force close", message),
+        Outcome::Refused { message } => (L::Warn, "Refused to close", message),
+        Outcome::Failed { message } => (L::Error, "Failed to close", message),
     }
 }
 
@@ -319,6 +421,7 @@ fn do_scan(state: &AppState) -> ScanResult {
                 .map(|s| s.id.clone()),
         );
     }
+    log_list_changes(&state.log, &state.logged_procs, &suggestions);
     // Keep the latest service targets; replace process ones.
     {
         let mut t = lock(&state.targets);
@@ -593,6 +696,7 @@ fn observe_docker(state: &AppState, containers: Option<&[services::Container]>) 
             let mut act = lock(&state.docker_activity);
             act.observe(cs, now);
             crate::json_file::log_save(
+                &state.log,
                 &state.docker_activity_path,
                 act.save(&state.docker_activity_path),
             );
@@ -672,6 +776,7 @@ fn do_scan_services(state: &AppState) -> ServicesResult {
                 .map(|s| s.id.clone()),
         );
     }
+    log_list_changes(&state.log, &state.logged_services, &suggestions);
     let result = ServicesResult {
         suggestions,
         docker: if containers.is_some() {
@@ -681,7 +786,15 @@ fn do_scan_services(state: &AppState) -> ServicesResult {
         },
         ollama: if models.is_some() { "running" } else { "off" },
     };
-    *lock(&state.services_cache) = Some(result.clone());
+    let previous = lock(&state.services_cache).replace(result.clone());
+    for (name, was, now) in [
+        ("Docker", previous.as_ref().map(|p| p.docker), result.docker),
+        ("Ollama", previous.as_ref().map(|p| p.ollama), result.ollama),
+    ] {
+        if was != Some(now) {
+            state.log.info(format!("{name} is {now}"));
+        }
+    }
     result
 }
 
@@ -986,10 +1099,18 @@ pub async fn close_item(app: AppHandle, id: String, force: bool) -> Result<Outco
 fn close_target(state: &AppState, id: &str, force: bool) -> Outcome {
     {
         let Some(target) = lock(&state.targets).get(id).cloned() else {
+            state
+                .log
+                .warn("Close asked for an item from an old list; told the panel to refresh");
             return Outcome::Refused {
                 message: "List changed. Refresh.".into(),
             };
         };
+        let label = target.label();
+        state.log.info(format!(
+            "Closing \"{label}\"{}",
+            if force { " (force)" } else { "" }
+        ));
         let outcome = match &target {
             Target::Procs { target, .. } => {
                 let frontmost = lock(&state.front).last_front;
@@ -1042,21 +1163,30 @@ fn close_target(state: &AppState, id: &str, force: bool) -> Outcome {
                 }
             }
         };
+        let (level, what, message) = outcome_entry(&outcome);
+        state
+            .log
+            .write(level, &format!("{what} \"{label}\": {message}"));
         if let Outcome::Closed { freed, disk, .. } = &outcome {
             lock(&state.targets).remove(id);
             let Some(kind) = target.memory_kind() else {
                 let mut h = lock(&state.history);
                 h.record_disk(*disk);
-                crate::json_file::log_save(&state.history_path, h.save(&state.history_path));
+                crate::json_file::log_save(
+                    &state.log,
+                    &state.history_path,
+                    h.save(&state.history_path),
+                );
                 return outcome;
             };
-            let kind = serde_json::to_value(kind)
-                .ok()
-                .and_then(|v| v.as_str().map(str::to_string))
-                .unwrap_or_default();
+            let kind = kind_name(kind);
             let mut h = lock(&state.history);
             h.record_freed(history::today(), *freed, &kind);
-            crate::json_file::log_save(&state.history_path, h.save(&state.history_path));
+            crate::json_file::log_save(
+                &state.log,
+                &state.history_path,
+                h.save(&state.history_path),
+            );
         }
         outcome
     }
@@ -1064,10 +1194,11 @@ fn close_target(state: &AppState, id: &str, force: bool) -> Outcome {
 
 #[tauri::command]
 pub fn ignore_item(state: State<'_, AppState>, id: String) -> Result<(), String> {
-    let key = lock(&state.targets)
+    let (key, label) = lock(&state.targets)
         .get(&id)
-        .map(|t| t.key().to_string())
+        .map(|t| (t.key().to_string(), t.label()))
         .ok_or("List changed. Refresh.")?;
+    state.log.info(format!("Ignoring \"{label}\" from now on"));
     let mut s = lock(&state.settings);
     if !s.ignored.contains(&key) {
         s.ignored.push(key);
@@ -1097,7 +1228,9 @@ pub fn apply_shortcut(app: &AppHandle, old: &str) -> Result<(), String> {
         return Ok(());
     }
     gs.register(new.as_str()).map_err(|e| {
-        crate::logfile::error(&format!("shortcut {new} unavailable: {e}"));
+        app.state::<AppState>()
+            .log
+            .warn(format!("Shortcut {new} unavailable: {e}"));
         format!("Saved, but the shortcut {new} isn't available (another app may use it).")
     })
 }
@@ -1118,14 +1251,24 @@ pub fn set_settings(
         } else {
             auto.disable()
         };
-        r.map_err(|e| format!("Couldn't change login item: {e}"))?;
+        r.map_err(|e| {
+            state.log.error(format!("Couldn't change login item: {e}"));
+            format!("Couldn't change login item: {e}")
+        })?;
     }
     let (saved, old_shortcut) = {
         let mut s = lock(&state.settings);
         // Save first: a failed save must not leave unsaved values in use.
-        new.save(&state.settings_path)
-            .map_err(|e| format!("Couldn't save settings: {e}"))?;
+        new.save(&state.settings_path).map_err(|e| {
+            state.log.error(format!("Couldn't save settings: {e}"));
+            format!("Couldn't save settings: {e}")
+        })?;
         let old = std::mem::replace(&mut *s, new);
+        if *s != old {
+            state
+                .log
+                .info(format!("Settings changed: {}", settings_line(&s)));
+        }
         (s.clone(), old.shortcut)
     };
     if saved.shortcut != old_shortcut {
@@ -1168,7 +1311,9 @@ pub fn hide_panel(app: AppHandle) {
 #[tauri::command]
 pub fn quit_butters(app: AppHandle) {
     let state = app.state::<AppState>();
+    state.log.info("Quit from the panel");
     crate::json_file::log_save(
+        &state.log,
         &state.history_path,
         lock(&state.history).save(&state.history_path),
     );
@@ -1183,6 +1328,7 @@ pub fn spawn_background(app: AppHandle) {
         .name("butters-watch".into())
         .spawn(move || {
             let mut tick: u64 = 0;
+            let mut last_level: Option<Level> = None;
             lock(&app.state::<AppState>().sampler).sample();
             // Debug builds only: fire one real alert through the normal path,
             // so tests can see what a notification looks like.
@@ -1217,19 +1363,23 @@ pub fn spawn_background(app: AppHandle) {
                         .filter(|l| seen.insert((l.pid, l.start)))
                         .collect::<Vec<_>>()
                 };
-                if let Some(l) = new_leaks.first()
-                    && lock(&state.settings).alerts
-                    && !panel_open
-                {
-                    crate::permissions::notify(
-                        &app,
-                        &format!(
-                            "{} grew {} in {}",
-                            l.label,
-                            fmt_bytes(l.growth.bytes),
-                            fmt_duration(l.growth.secs.max(60))
-                        ),
+                let alerts_on = lock(&state.settings).alerts;
+                for (i, l) in new_leaks.iter().enumerate() {
+                    let msg = format!(
+                        "{} grew {} in {}",
+                        l.label,
+                        fmt_bytes(l.growth.bytes),
+                        fmt_duration(l.growth.secs.max(60))
                     );
+                    // One notification per minute at most; the rest are only logged.
+                    let show = i == 0 && alerts_on && !panel_open;
+                    state.log.warn(format!(
+                        "Leak: {msg}{}",
+                        alert_suffix(show, alerts_on, panel_open)
+                    ));
+                    if show {
+                        crate::permissions::notify(&app, &msg);
+                    }
                 }
                 // Docker activity every 10 minutes, even with the panel closed,
                 // so "no activity for 6 days" is measured, not guessed.
@@ -1240,6 +1390,16 @@ pub fn spawn_background(app: AppHandle) {
                     let _ = do_scan_services(&state);
                 }
                 let level = alerts::level(&stats);
+                if last_level != Some(level) {
+                    let name = level_name(level);
+                    state.log.info(format!(
+                        "Machine is {name}: {}, pressure {:?}, thermal {:?}",
+                        summary_line(&stats),
+                        stats.pressure,
+                        stats.thermal
+                    ));
+                    last_level = Some(level);
+                }
                 crate::panel::set_tray_level(&app, level, &stats);
                 {
                     let mut h = lock(&state.history);
@@ -1247,21 +1407,47 @@ pub fn spawn_background(app: AppHandle) {
                     // Write at most every ~10 minutes; closes save right away.
                     if tick.is_multiple_of(200) {
                         crate::json_file::log_save(
+                            &state.log,
                             &state.history_path,
                             h.save(&state.history_path),
                         );
                     }
                 }
                 let alert = lock(&state.alerts).check(&stats, Instant::now());
-                if let Some((_, msg)) = alert
-                    && lock(&state.settings).alerts
-                    && !panel_open
-                {
-                    crate::permissions::notify(&app, msg);
+                if let Some((_, msg)) = alert {
+                    let show = alerts_on && !panel_open;
+                    state.log.warn(format!(
+                        "Alert: {msg}{}",
+                        alert_suffix(show, alerts_on, panel_open)
+                    ));
+                    if show {
+                        crate::permissions::notify(&app, msg);
+                    }
                 }
             }
         })
         .expect("spawn background thread");
+}
+
+fn level_name(level: Level) -> &'static str {
+    match level {
+        Level::Smooth => "smooth",
+        Level::Busy => "busy",
+        Level::Strained => "strained",
+    }
+}
+
+/// Why an alert was or wasn't shown, for the log.
+fn alert_suffix(shown: bool, alerts_on: bool, panel_open: bool) -> &'static str {
+    if shown {
+        " (notified)"
+    } else if !alerts_on {
+        " (not notified: alerts are off)"
+    } else if panel_open {
+        " (not notified: panel was open)"
+    } else {
+        " (not notified)"
+    }
 }
 
 pub fn summary_line(stats: &Stats) -> String {
@@ -1363,7 +1549,10 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("butters-app-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        (AppState::new(dir.join("settings.json")), dir)
+        (
+            AppState::new(dir.join("settings.json"), Log::disabled()),
+            dir,
+        )
     }
 
     fn procs(pid: u32, start: u64) -> Target {
@@ -1419,7 +1608,7 @@ mod tests {
         assert!(matches!(out, Outcome::Closed { .. }), "{out:?}");
         assert!(!actions::tests::alive(pid));
         assert!(!lock(&state.targets).contains_key("7"));
-        let saved = History::load(&state.history_path);
+        let saved = History::load(&state.history_path, &state.log);
         assert_eq!(saved.lifetime.closed, 1);
         assert_eq!(saved.lifetime.by_kind["dev_server"], 1);
         let _ = std::fs::remove_dir_all(dir);

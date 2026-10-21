@@ -45,8 +45,8 @@ impl Activity {
         config_dir.join("docker-activity.json")
     }
 
-    pub fn load(path: &Path) -> Activity {
-        crate::json_file::read(path, 512 * 1024).unwrap_or_default()
+    pub fn load(path: &Path, log: &crate::log::Log) -> Activity {
+        crate::json_file::read(path, 512 * 1024, log).unwrap_or_default()
     }
 
     pub fn save(&self, path: &Path) -> std::io::Result<()> {
@@ -187,7 +187,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("butters-dock-{}", std::process::id()));
         let path = Activity::path(&dir);
         a.save(&path).unwrap();
-        assert_eq!(Activity::load(&path), a);
+        assert_eq!(Activity::load(&path, &crate::log::Log::disabled()), a);
         let _ = std::fs::remove_dir_all(dir);
     }
 }

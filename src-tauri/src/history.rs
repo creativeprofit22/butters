@@ -79,8 +79,8 @@ impl History {
         config_dir.join("history.json")
     }
 
-    pub fn load(path: &Path) -> History {
-        let mut h = crate::json_file::read::<History>(path, 256 * 1024).unwrap_or_default();
+    pub fn load(path: &Path, log: &crate::log::Log) -> History {
+        let mut h = crate::json_file::read::<History>(path, 256 * 1024, log).unwrap_or_default();
         h.adopt_days(now_secs());
         h
     }
@@ -249,9 +249,9 @@ mod tests {
         let mut h = History::default();
         h.record_freed(5, 42, "app");
         h.save(&path).unwrap();
-        assert_eq!(History::load(&path), h);
+        assert_eq!(History::load(&path, &crate::log::Log::disabled()), h);
         std::fs::write(&path, b"nope").unwrap();
-        let fresh = History::load(&path);
+        let fresh = History::load(&path, &crate::log::Log::disabled());
         assert!(fresh.days.is_empty() && fresh.lifetime.freed == 0 && fresh.lifetime.since > 0);
         // The bad file is kept aside, not overwritten by the next save.
         assert_eq!(
