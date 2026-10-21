@@ -167,6 +167,24 @@
         "Not checked: clippy (with or without playground), Playwright e2e, no new full vocabulary review"
       ]
     },
+    "performance": {
+      "checkedAt": "2026-10-21T08:35:35.942Z",
+      "commit": "eb6fb4e",
+      "uncommittedChanges": true,
+      "result": "pass",
+      "summary": "Re-check of the 3 recorded findings: all fixed and verified by build/lint/tests; timings not re-measured. Scope limited to those findings.",
+      "findings": [],
+      "evidence": [
+        "High fixed: live_stats now async + spawn_blocking (off main thread); do_scan sleeps WARM_UP after releasing the sampler lock",
+        "Medium fixed: App.svelte refreshServices skips while one is in flight; 15 s auto-refresh rescans Docker/Ollama at most every 60 s",
+        "Low fixed: old-image check cached 10 min in AppState.old_images (docker_disk_with); cleared on any Docker disk clean-up",
+        "pnpm lint OK; pnpm check 0 errors/0 warnings; cargo fmt --check OK",
+        "cargo clippy --all-targets -D warnings OK with and without --features playground; cargo test 90 passed",
+        "Playwright Chromium: 57 passed, 1 skipped",
+        "Scope: re-check of the 3 findings recorded earlier today only",
+        "Not checked: WebKit specs (browser not installed, launch fails), macOS app, scan/Docker timings not re-measured"
+      ]
+    },
     "quality-tools": {
       "checkedAt": "2026-10-20T16:11:18.951Z",
       "commit": "200ec23",

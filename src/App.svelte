@@ -117,16 +117,33 @@
     toastTimer = setTimeout(() => (toast = ""), 6000);
   }
 
-  async function refresh() {
-    if (refreshing) return;
-    refreshing = true;
-    error = null;
+  /** Docker/Ollama checks take several Docker calls: at most one at a time,
+   * and the 15 s auto-refresh only redoes them once a minute. */
+  const SERVICES_EVERY_MS = 60_000;
+  let servicesBusy = false;
+  let servicesAt = -Infinity;
+
+  function refreshServices(force: boolean) {
+    if (servicesBusy || (!force && performance.now() - servicesAt < SERVICES_EVERY_MS)) return;
+    servicesBusy = true;
     // Docker stats can take a few seconds; don't hold the list for them.
     api
       .scanServices()
       .then((r) => (services = r))
       .catch(() => (services = null))
-      .finally(() => void loadSweep());
+      .finally(() => {
+        servicesBusy = false;
+        servicesAt = performance.now();
+        void loadSweep();
+      });
+  }
+
+  /** `auto`: the periodic refresh, which may skip the Docker/Ollama check. */
+  async function refresh(auto = false) {
+    if (refreshing) return;
+    refreshing = true;
+    error = null;
+    refreshServices(!auto);
     try {
       scan = await api.scan();
       void loadSweep();
@@ -440,7 +457,8 @@
       .catch(() => {});
     void loadSmoothness();
     const timer = setInterval(() => {
-      if (!running && !confirming && !savings && view === "main" && document.visibilityState === "visible") refresh();
+      if (!running && !confirming && !savings && view === "main" && document.visibilityState === "visible")
+        refresh(true);
     }, 15000);
     return () => {
       clearInterval(live);
@@ -490,7 +508,7 @@
           {/key}
         </div>
         <div class="tools">
-          <button class="ghost" type="button" aria-label="Refresh" use:tip={"Refresh"} onclick={refresh} disabled={refreshing || running}>
+          <button class="ghost" type="button" aria-label="Refresh" use:tip={"Refresh"} onclick={() => refresh()} disabled={refreshing || running}>
             <span class="spin" class:spinning={refreshing}><Icon name="refresh" /></span>
           </button>
           <button class="ghost" type="button" aria-label="Stats" use:tip={"Stats"} onclick={() => openStats()}>
@@ -542,7 +560,7 @@
         {#if error}
           <div class="empty" in:pour>
             <p class="empty-title" use:tip={error}>Couldn't read processes</p>
-            <button class="btn" type="button" onclick={refresh}>Try again</button>
+            <button class="btn" type="button" onclick={() => refresh()}>Try again</button>
           </div>
         {:else if !scan}
           <div class="skeleton" aria-label="Looking at what's running" role="status">

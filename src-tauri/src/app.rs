@@ -140,6 +140,10 @@ pub struct AppState {
     /// The last Docker/Ollama result, so the panel can show it instantly
     /// while a fresh one is fetched.
     services_cache: Mutex<Option<ServicesResult>>,
+    /// Old image versions from the last full check, and when it ran. That
+    /// check takes five Docker calls and rarely changes, so services scans
+    /// reuse it for `OLD_IMAGES_TTL`.
+    old_images: Mutex<Option<(Instant, Vec<services::OldImage>)>>,
     pub alerts: Mutex<AlertState>,
     pub panel_open: AtomicBool,
     seq: AtomicU64,
@@ -170,6 +174,7 @@ impl AppState {
             leak_notified: Mutex::new(HashSet::new()),
             sweepable: Mutex::new(Vec::new()),
             services_cache: Mutex::new(None),
+            old_images: Mutex::new(None),
             alerts: Mutex::new(AlertState::default()),
             panel_open: AtomicBool::new(false),
             seq: AtomicU64::new(1),
@@ -258,6 +263,19 @@ fn scan_context(state: &AppState) -> Context {
 fn do_scan(state: &AppState) -> ScanResult {
     let t0 = Instant::now();
     let ports = sampler::listening_ports();
+    // Wait out the warm-up without the lock, so live meters and the
+    // background sample aren't stuck behind it.
+    let warmed = {
+        let mut s = lock(&state.sampler);
+        let needed = s.needs_warm_up();
+        if needed {
+            s.warm_up();
+        }
+        needed
+    };
+    if warmed {
+        std::thread::sleep(sampler::WARM_UP);
+    }
     let (mut procs, stats) = {
         let mut s = lock(&state.sampler);
         let procs = s.snapshot(&ports);
@@ -593,13 +611,22 @@ fn observe_docker(state: &AppState, containers: Option<&[services::Container]>) 
 }
 
 const DAY: u64 = 24 * 60 * 60;
+const OLD_IMAGES_TTL: std::time::Duration = std::time::Duration::from_secs(10 * 60);
 
 fn do_scan_services(state: &AppState) -> ServicesResult {
+    let cached_old = lock(&state.old_images)
+        .as_ref()
+        .filter(|(at, _)| at.elapsed() < OLD_IMAGES_TTL)
+        .map(|(_, v)| v.clone());
+    let reused = cached_old.is_some();
     let docker = std::thread::spawn(services::docker_containers);
-    let disk = std::thread::spawn(services::docker_disk);
+    let disk = std::thread::spawn(move || services::docker_disk_with(cached_old));
     let ollama = std::thread::spawn(services::ollama_models);
     let mut containers = docker.join().ok().flatten();
     let mut disk = disk.join().ok().flatten();
+    if !reused && let Some(d) = &disk {
+        *lock(&state.old_images) = Some((Instant::now(), d.old_images.clone()));
+    }
     let mut models = ollama.join().ok().flatten();
     if e2e_only_pid().is_some() || cfg!(feature = "playground") {
         containers = None;
@@ -902,13 +929,19 @@ pub fn smoothness(state: State<'_, AppState>) -> Summary {
 }
 
 /// Live meters: called every couple of seconds while the panel is open.
+/// Async so it never runs on the main thread: a scan can hold the sampler
+/// for a moment, and waiting there would freeze the tray and panel.
 #[tauri::command]
-pub fn live_stats(state: State<'_, AppState>) -> LiveStats {
-    let stats = lock(&state.sampler).quick_stats();
-    LiveStats {
-        level: alerts::level(&stats),
-        stats,
-    }
+pub async fn live_stats(app: AppHandle) -> Result<LiveStats, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let stats = lock(&app.state::<AppState>().sampler).quick_stats();
+        LiveStats {
+            level: alerts::level(&stats),
+            stats,
+        }
+    })
+    .await
+    .map_err(blocking_err)
 }
 
 #[derive(Serialize)]
@@ -988,6 +1021,8 @@ fn close_target(state: &AppState, id: &str, force: bool) -> Outcome {
                 },
             },
             Target::DockerDisk { which, .. } => {
+                // Images may change; the next services scan checks afresh.
+                *lock(&state.old_images) = None;
                 let r = match which {
                     DiskWhich::BuildCache => services::docker_prune_build_cache(),
                     DiskWhich::DanglingImages => services::docker_prune_dangling_images(),

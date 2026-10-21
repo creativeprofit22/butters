@@ -520,6 +520,12 @@ fn old_images_now(docker: &PathBuf, now: u64) -> Option<Vec<OldImage>> {
 }
 
 pub fn docker_disk() -> Option<DockerDisk> {
+    docker_disk_with(None)
+}
+
+/// Like `docker_disk`, but reuses `old_images` when given instead of
+/// checking them again (that check takes five more Docker calls).
+pub fn docker_disk_with(old_images: Option<Vec<OldImage>>) -> Option<DockerDisk> {
     let docker = find_docker()?;
     let df = run(
         &docker,
@@ -570,7 +576,10 @@ pub fn docker_disk() -> Option<DockerDisk> {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    disk.old_images = old_images_now(&docker, now).unwrap_or_default();
+    disk.old_images = match old_images {
+        Some(v) => v,
+        None => old_images_now(&docker, now).unwrap_or_default(),
+    };
     Some(disk)
 }
 

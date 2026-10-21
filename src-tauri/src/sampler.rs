@@ -16,6 +16,22 @@ use crate::trends::Reading;
 /// on average since the previous sample.
 const ACTIVE_CPU_PCT: f32 = 2.0;
 
+/// Gap between the two readings a first snapshot needs for CPU use.
+pub const WARM_UP: Duration = Duration::from_millis(500);
+
+/// What a scan's snapshot reads per process. Exe, command line, folder and
+/// owner are fetched once per process, then reused.
+fn snapshot_kind() -> ProcessRefreshKind {
+    ProcessRefreshKind::nothing()
+        .with_cpu()
+        .with_memory()
+        .with_exe(UpdateKind::OnlyIfNotSet)
+        .with_cmd(UpdateKind::OnlyIfNotSet)
+        .with_cwd(UpdateKind::OnlyIfNotSet)
+        .with_user(UpdateKind::OnlyIfNotSet)
+        .without_tasks()
+}
+
 struct Activity {
     cpu_ms: u64,
     at: Instant,
@@ -150,28 +166,28 @@ impl Sampler {
         self.activity.retain(|k, _| seen.contains(k));
     }
 
+    /// Whether the next snapshot needs a first reading `WARM_UP` before it
+    /// (CPU use needs two readings some time apart).
+    pub fn needs_warm_up(&self) -> bool {
+        self.last_refresh
+            .is_none_or(|t| t.elapsed() < Duration::from_millis(300))
+    }
+
+    /// Takes that first reading. Callers holding the sampler behind a lock
+    /// should release it while they wait `WARM_UP`, so others aren't stalled.
+    pub fn warm_up(&mut self) {
+        self.refresh(snapshot_kind());
+    }
+
     /// Full picture for a scan: adds command lines, folders and owners, and
     /// combines CPU history with terminal activity into an idle time.
     pub fn snapshot(&mut self, ports: &HashMap<u32, Vec<u16>>) -> Vec<ProcInfo> {
-        let first = self.last_refresh.is_none();
-        let kind = ProcessRefreshKind::nothing()
-            .with_cpu()
-            .with_memory()
-            .with_exe(UpdateKind::OnlyIfNotSet)
-            .with_cmd(UpdateKind::OnlyIfNotSet)
-            .with_cwd(UpdateKind::OnlyIfNotSet)
-            .with_user(UpdateKind::OnlyIfNotSet)
-            .without_tasks();
-        if first
-            || self
-                .last_refresh
-                .is_some_and(|t| t.elapsed() < Duration::from_millis(300))
-        {
+        if self.needs_warm_up() {
             // CPU use needs two readings; take a short second one on first use.
-            self.refresh(kind);
-            std::thread::sleep(Duration::from_millis(500));
+            self.warm_up();
+            std::thread::sleep(WARM_UP);
         }
-        self.refresh(kind);
+        self.refresh(snapshot_kind());
 
         if self.my_uid.is_none() {
             self.my_uid = self
