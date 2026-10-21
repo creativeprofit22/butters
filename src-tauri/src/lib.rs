@@ -5,6 +5,7 @@ pub mod docker_activity;
 pub mod engine;
 pub mod history;
 pub mod json_file;
+pub mod logfile;
 pub mod panel;
 pub mod permissions;
 pub mod platform;
@@ -49,6 +50,8 @@ pub fn run() {
             // Menu bar app: no Dock icon, no app switcher entry.
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            // First, so later problems and panics land in the log file.
+            logfile::init(&app.path().app_log_dir()?);
             let config_dir = app.path().app_config_dir()?;
             app.manage(app::AppState::new(settings::Settings::path(&config_dir)));
             panel::setup_tray(app.handle())?;

@@ -65,6 +65,8 @@ Butters lives in your menu bar and keeps a busy dev machine running smooth. A da
 
 The only permission it asks for is notifications, for alerts. One click turns them on.
 
+Something went wrong? Butters keeps a local log (nothing is sent anywhere): `~/Library/Logs/com.kenkai.butters/butters.log` on macOS, `%LOCALAPPDATA%\com.kenkai.butters\logs\butters.log` on Windows. Attach it to a [bug report](https://github.com/KenKaiii/butters/issues/new).
+
 ## Try it safely
 
 Want to see Butters close things without touching your own work? Build **Butters Playground** from source (`pnpm playground`, macOS only, see below). It's a separate test app that starts seven throwaway processes (dev servers, an agent session, an MCP server, a busy build and a leaking process) and can only see those. Close them as often as you like, then hit **Reset**. Your real apps are invisible to it. It isn't part of the download.

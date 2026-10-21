@@ -150,6 +150,22 @@
         "Not checked: required CI status checks not added (fork has no Actions runs yet); upstream KenKaiii protection (no admin access)"
       ]
     },
+    "monitoring": {
+      "checkedAt": "2026-10-21T16:28:44.328Z",
+      "commit": "d359885",
+      "uncommittedChanges": true,
+      "result": "pass",
+      "summary": "Re-check of the 3 recorded findings: errors and panics now go to a local log file whose location is documented in the README; health checks are N/A because there is no service.",
+      "findings": [],
+      "evidence": [
+        "Added src-tauri/src/logfile.rs: logs to butters.log in app_log_dir (rotates at 512 KB), panic hook with backtrace before abort, init first in lib.rs setup",
+        "Replaced all eprintln! in json_file.rs, app.rs, permissions.rs with logfile::error (grep: only logfile.rs uses eprintln!)",
+        "README.md: log paths for macOS/Windows + bug-report link",
+        "cargo fmt --check clean; cargo test 92 passed incl. 2 new logfile tests; clippy -D warnings clean with and without --features playground",
+        "Scope: re-check of the 3 findings recorded earlier today only, not a new review",
+        "Not checked: macOS-only permissions.rs change not compiled (Windows host); no real release build run, so I didn't watch a panic get written to the log"
+      ]
+    },
     "naming": {
       "checkedAt": "2026-10-20T14:27:47.798Z",
       "commit": "5992028",

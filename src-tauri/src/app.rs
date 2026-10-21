@@ -1097,7 +1097,7 @@ pub fn apply_shortcut(app: &AppHandle, old: &str) -> Result<(), String> {
         return Ok(());
     }
     gs.register(new.as_str()).map_err(|e| {
-        eprintln!("shortcut {new} unavailable: {e}");
+        crate::logfile::error(&format!("shortcut {new} unavailable: {e}"));
         format!("Saved, but the shortcut {new} isn't available (another app may use it).")
     })
 }

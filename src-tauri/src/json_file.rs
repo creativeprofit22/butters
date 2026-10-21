@@ -15,7 +15,7 @@ pub fn read<T: DeserializeOwned>(path: &Path, max_bytes: usize) -> Option<T> {
         Ok(b) => b,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
         Err(e) => {
-            eprintln!("couldn't read {}: {e}", path.display());
+            crate::logfile::error(&format!("couldn't read {}: {e}", path.display()));
             return None;
         }
     };
@@ -29,15 +29,15 @@ pub fn read<T: DeserializeOwned>(path: &Path, max_bytes: usize) -> Option<T> {
     };
     let bad = bad_path(path);
     match std::fs::rename(path, &bad) {
-        Ok(()) => eprintln!(
+        Ok(()) => crate::logfile::error(&format!(
             "{} unusable ({problem}); kept it as {} and started fresh",
             path.display(),
             bad.display()
-        ),
-        Err(e) => eprintln!(
+        )),
+        Err(e) => crate::logfile::error(&format!(
             "{} unusable ({problem}); couldn't move it aside: {e}",
             path.display()
-        ),
+        )),
     }
     None
 }
@@ -45,7 +45,7 @@ pub fn read<T: DeserializeOwned>(path: &Path, max_bytes: usize) -> Option<T> {
 /// Logs a failed save; used where a save is best-effort and nobody waits on it.
 pub fn log_save(path: &Path, result: std::io::Result<()>) {
     if let Err(e) = result {
-        eprintln!("couldn't save {}: {e}", path.display());
+        crate::logfile::error(&format!("couldn't save {}: {e}", path.display()));
     }
 }
 

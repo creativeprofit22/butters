@@ -157,10 +157,10 @@ mod imp {
         let done = RcBlock::new(|err: *mut NSError| {
             if !err.is_null() {
                 // SAFETY: non-null NSError passed by the system for this callback.
-                eprintln!(
+                crate::logfile::error(&format!(
                     "notification failed: {}",
                     unsafe { &*err }.localizedDescription()
-                );
+                ));
             }
         });
         UNUserNotificationCenter::currentNotificationCenter()
