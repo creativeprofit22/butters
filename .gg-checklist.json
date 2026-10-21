@@ -71,6 +71,21 @@
         "Not checked: command not run end to end; no git pre-commit hook, so plain git commit stays ungated"
       ]
     },
+    "dependencies": {
+      "checkedAt": "2026-10-21T05:51:40.018Z",
+      "commit": "1d9f8a3",
+      "uncommittedChanges": true,
+      "result": "pass",
+      "summary": "Re-check of the 1 recorded finding: rustls-webpki bumped to 0.103.16 in Cargo.lock; cargo audit now reports 0 vulnerabilities (Linux-only warnings remain, allowed).",
+      "findings": [],
+      "evidence": [
+        "cargo update -p rustls-webpki: 0.103.15 -> 0.103.16 (src-tauri/Cargo.lock, 2 lines)",
+        "cargo audit: no vulnerabilities; 5 allowed warnings (Linux-only crates)",
+        "cargo check: finished OK",
+        "Scope: re-check of the rustls-webpki finding only",
+        "Not checked: clippy, tests and release builds not re-run; Cargo.lock change is uncommitted"
+      ]
+    },
     "docs": {
       "checkedAt": "2026-10-20T14:20:19.759Z",
       "commit": "5992028",
