@@ -286,6 +286,42 @@ mod tests {
     }
 
     #[test]
+    fn two_apps_webview2_cpu_is_not_merged() {
+        use crate::engine::assess::reading_labels;
+        use crate::engine::model::ProcInfo;
+        let proc = |pid: u32, parent: u32, exe: &str| ProcInfo {
+            pid,
+            parent: Some(parent),
+            start_time: 1000 + pid as u64,
+            name: exe.rsplit('\\').next().unwrap_or(exe).into(),
+            exe: Some(exe.into()),
+            ..Default::default()
+        };
+        let wv = r"C:\Program Files (x86)\Microsoft\EdgeWebView\Application\130.0.2849.80\msedgewebview2.exe";
+        let procs = [
+            proc(100, 4, r"C:\Program Files\Handy\handy.exe"),
+            proc(101, 100, wv),
+            proc(200, 4, r"C:\Users\me\AppData\Local\Slack\slack.exe"),
+            proc(201, 200, wv),
+            proc(202, 201, wv),
+        ];
+        let labels = reading_labels(&procs);
+        let cpu = [(101, 30.0), (201, 10.0), (202, 15.0)];
+        let mut t = Trends::default();
+        let rs: Vec<Reading> = cpu
+            .iter()
+            .map(|&(pid, c)| r(pid, &labels[&pid], 0, c))
+            .collect();
+        t.record(0, &rs);
+        let (c, _) = t.culprits(5);
+        assert!(c.iter().all(|x| !x.label.contains("msedgewebview2")));
+        assert_eq!(c.len(), 2);
+        assert!((c[0].avg - 30.0).abs() < 0.01);
+        assert!((c[1].avg - 25.0).abs() < 0.01);
+        assert_ne!(c[0].label, c[1].label);
+    }
+
+    #[test]
     fn cpu_window_is_thirty_minutes() {
         let mut t = Trends::default();
         for i in 0..45 {

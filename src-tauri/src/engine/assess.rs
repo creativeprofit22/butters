@@ -102,34 +102,78 @@ struct Tree<'a> {
     children: HashMap<u32, Vec<u32>>,
 }
 
+/// How sure we are that a process's recorded parent really started it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Link {
+    /// Both start times are known and the parent is not newer than the child.
+    Verified(u32),
+    /// The parent is there, but a start time is unknown (0: the OS wouldn't
+    /// let us read it), so the pid could have been reused.
+    Unverified(u32),
+    /// No parent, it is gone, or its pid now belongs to a newer process.
+    Gone,
+}
+
 impl<'a> Tree<'a> {
     fn new(procs: &'a [ProcInfo]) -> Self {
         let by_pid: HashMap<u32, &ProcInfo> = procs.iter().map(|p| (p.pid, p)).collect();
         let mut children: HashMap<u32, Vec<u32>> = HashMap::new();
         for p in procs {
-            if let Some(parent) = Self::valid_parent(&by_pid, p) {
+            if let Link::Verified(parent) = Self::link_of(&by_pid, p) {
                 children.entry(parent).or_default().push(p.pid);
             }
         }
         Tree { by_pid, children }
     }
 
-    /// The parent, unless it is gone or its pid was reused by a newer process.
-    fn valid_parent(by_pid: &HashMap<u32, &ProcInfo>, p: &ProcInfo) -> Option<u32> {
-        let parent = p.parent?;
-        let pp = by_pid.get(&parent)?;
-        (pp.pid != p.pid && pp.start_time <= p.start_time).then_some(parent)
+    fn link_of(by_pid: &HashMap<u32, &ProcInfo>, p: &ProcInfo) -> Link {
+        let Some(pp) = p.parent.and_then(|parent| by_pid.get(&parent)) else {
+            return Link::Gone;
+        };
+        if pp.pid == p.pid {
+            Link::Gone
+        } else if pp.start_time == 0 || p.start_time == 0 {
+            Link::Unverified(pp.pid)
+        } else if pp.start_time > p.start_time {
+            Link::Gone
+        } else {
+            Link::Verified(pp.pid)
+        }
     }
 
+    fn link(&self, pid: u32) -> Link {
+        match self.by_pid.get(&pid) {
+            Some(p) => Self::link_of(&self.by_pid, p),
+            None => Link::Gone,
+        }
+    }
+
+    /// The parent, only when we're sure it is the one that started this.
+    /// Grouping and closing never cross a link we can't verify.
     fn parent(&self, pid: u32) -> Option<u32> {
-        let p = self.by_pid.get(&pid)?;
-        Self::valid_parent(&self.by_pid, p)
+        match self.link(pid) {
+            Link::Verified(parent) => Some(parent),
+            _ => None,
+        }
     }
 
     fn ancestors(&self, pid: u32) -> Vec<u32> {
+        self.walk_up(pid, |t, cur| t.parent(cur))
+    }
+
+    /// Ancestors, also through parents we can't verify. Only for protecting
+    /// (over-protecting is safe), never for grouping or closing.
+    fn possible_ancestors(&self, pid: u32) -> Vec<u32> {
+        self.walk_up(pid, |t, cur| match t.link(cur) {
+            Link::Verified(parent) | Link::Unverified(parent) => Some(parent),
+            Link::Gone => None,
+        })
+    }
+
+    fn walk_up(&self, pid: u32, step: impl Fn(&Self, u32) -> Option<u32>) -> Vec<u32> {
         let mut out = Vec::new();
         let mut cur = pid;
-        while let Some(parent) = self.parent(cur) {
+        while let Some(parent) = step(self, cur) {
             if out.contains(&parent) || out.len() > 64 {
                 break;
             }
@@ -157,11 +201,12 @@ impl<'a> Tree<'a> {
 }
 
 /// True when the parent is the init process: the terminal that started this
-/// is gone, but the process kept running.
+/// is gone, but the process kept running. A parent we can't verify (unknown
+/// start time) is not proof of that, so it doesn't count as gone.
 fn orphaned(tree: &Tree, p: &ProcInfo) -> bool {
     match p.parent {
         None | Some(0) | Some(1) => true,
-        Some(_) => tree.parent(p.pid).is_none(),
+        Some(_) => tree.link(p.pid) == Link::Gone,
     }
 }
 
@@ -220,13 +265,55 @@ pub fn build_groups(procs: &[ProcInfo], self_pid: u32) -> Vec<Group> {
         claimed: HashSet::new(),
         app_of: HashMap::new(),
         app_group_index: HashMap::new(),
+        helpers: procs
+            .iter()
+            .filter(|p| {
+                p.owned_by_user && classify::is_shared_helper(p.exe.as_deref().unwrap_or(&p.name))
+            })
+            .map(|p| p.pid)
+            .collect(),
     };
     b.add_apps(procs);
+    b.attach_helpers(procs);
     b.attach_vms(procs);
     b.add_cli_work(procs);
     b.add_heavy(procs);
     b.add_totals();
     b.groups
+}
+
+/// The name a process is counted under in leak watch and the fan view: its
+/// app's name, else its own name.
+fn own_label(p: &ProcInfo) -> String {
+    p.exe
+        .as_deref()
+        .and_then(app_root)
+        .map(|root| app_name(&root))
+        .unwrap_or_else(|| p.name.clone())
+}
+
+/// A label per pid for the minute sampler. Shared helpers (WebView2,
+/// Crashpad...) take the label of the first non-helper process that
+/// verifiably started them, the same owner `build_groups` gives them, so
+/// two apps' WebView2 CPU isn't merged under one name. A helper without a
+/// verified owner keeps its own name.
+pub fn reading_labels(procs: &[ProcInfo]) -> HashMap<u32, String> {
+    let tree = Tree::new(procs);
+    let is_helper = |p: &ProcInfo| classify::is_shared_helper(p.exe.as_deref().unwrap_or(&p.name));
+    procs
+        .iter()
+        .map(|p| {
+            let owner = if is_helper(p) {
+                tree.ancestors(p.pid)
+                    .into_iter()
+                    .filter_map(|a| tree.by_pid.get(&a).copied())
+                    .find(|a| !is_helper(a))
+            } else {
+                None
+            };
+            (p.pid, own_label(owner.unwrap_or(p)))
+        })
+        .collect()
 }
 
 /// State shared by the grouping passes, which run in order: apps first,
@@ -240,6 +327,10 @@ struct Grouping<'a> {
     /// App root (bundle or program path) of each app process.
     app_of: HashMap<u32, String>,
     app_group_index: HashMap<String, usize>,
+    /// The user's shared runtime helpers (WebView2, Crashpad...). They belong
+    /// to whoever started them; one with no known owner gets no group at all,
+    /// so it is never shown, suggested or closed on its own.
+    helpers: HashSet<u32>,
 }
 
 impl Grouping<'_> {
@@ -310,7 +401,29 @@ impl Grouping<'_> {
         }
     }
 
-    /// 1b. Virtual machines belong to the app responsible for them, so Docker
+    /// 1b. Shared helpers join the app that started them (through other
+    /// helpers), so one app's WebView2 memory counts as that app's. Helpers
+    /// under command-line work or a heavy process are picked up with that
+    /// process's subtree later; the rest stay ungrouped.
+    fn attach_helpers(&mut self, procs: &[ProcInfo]) {
+        for p in procs {
+            if !self.helpers.contains(&p.pid) || self.claimed.contains(&p.pid) {
+                continue;
+            }
+            let owner = self
+                .tree
+                .ancestors(p.pid)
+                .into_iter()
+                .find(|a| !self.helpers.contains(a));
+            if let Some(root) = owner.and_then(|o| self.app_of.get(&o)) {
+                let idx = self.app_group_index[root];
+                self.groups[idx].members.push(p.pid);
+                self.claimed.insert(p.pid);
+            }
+        }
+    }
+
+    /// 1c. Virtual machines belong to the app responsible for them, so Docker
     /// Desktop's VM memory counts as Docker's (and quitting Docker frees it).
     fn attach_vms(&mut self, procs: &[ProcInfo]) {
         for p in procs {
@@ -424,16 +537,25 @@ impl Grouping<'_> {
     /// 3. Anything else that is heavy on its own.
     fn add_heavy(&mut self, procs: &[ProcInfo]) {
         for p in procs {
-            if !p.owned_by_user || self.claimed.contains(&p.pid) || p.pid == self.self_pid {
-                continue;
-            }
-            // Big, busy, or steadily growing (leak watch measured it climbing).
-            if classify::is_shell(p)
-                || !(p.memory >= 400 * MB || p.cpu >= 40.0 || p.growth.is_some())
+            if !p.owned_by_user
+                || self.claimed.contains(&p.pid)
+                || p.pid == self.self_pid
+                || self.helpers.contains(&p.pid)
+                || classify::is_shell(p)
             {
                 continue;
             }
             let members = self.unclaimed_subtree(p.pid);
+            // Its own helpers count toward it (a search UI and its WebView2).
+            let (memory, cpu) = members
+                .iter()
+                .filter(|m| **m == p.pid || self.helpers.contains(m))
+                .map(|m| self.tree.by_pid[m])
+                .fold((0, 0.0), |(mem, cpu), q| (mem + q.memory, cpu + q.cpu));
+            // Big, busy, or steadily growing (leak watch measured it climbing).
+            if !(memory >= 400 * MB || cpu >= 40.0 || p.growth.is_some()) {
+                continue;
+            }
             self.claimed.extend(members.iter().copied());
             let name = p.name.split_whitespace().next().unwrap_or(&p.name);
             let name = name
@@ -600,7 +722,7 @@ fn protection(
 pub fn assess(procs: &[ProcInfo], ctx: &Context) -> Vec<Assessed> {
     let groups = build_groups(procs, ctx.self_pid);
     let tree = Tree::new(procs);
-    let self_ancestors: HashSet<u32> = tree.ancestors(ctx.self_pid).into_iter().collect();
+    let self_ancestors: HashSet<u32> = tree.possible_ancestors(ctx.self_pid).into_iter().collect();
     let by_root: HashMap<u32, &Group> = groups
         .iter()
         .filter(|g| g.app_pid.is_some())
@@ -1510,5 +1632,366 @@ mod tests {
         assert_eq!(nexts.len(), 1, "one row, not two");
         assert_eq!(nexts[0].group.root, 500);
         assert!(nexts[0].group.members.contains(&120));
+    }
+
+    // ---- Shared helpers (WebView2 and friends) ----
+
+    const WEBVIEW: &str = r"C:\Program Files (x86)\Microsoft\EdgeWebView\Application\130.0.2849.80\msedgewebview2.exe";
+
+    fn webview(pid: u32, parent: u32, memory: u64, cpu: f32) -> ProcInfo {
+        ProcInfo {
+            memory,
+            cpu,
+            ..win(
+                pid,
+                parent,
+                "msedgewebview2.exe",
+                WEBVIEW,
+                &["msedgewebview2.exe"],
+            )
+        }
+    }
+
+    fn sized(mut p: ProcInfo, memory: u64) -> ProcInfo {
+        p.memory = memory;
+        p
+    }
+
+    fn group_with(out: &[Assessed], pid: u32) -> Option<&Assessed> {
+        out.iter().find(|a| a.group.members.contains(&pid))
+    }
+
+    fn no_helper_rows(out: &[Assessed]) {
+        for a in out {
+            assert!(
+                !a.group.key.to_ascii_lowercase().contains("msedgewebview2")
+                    && !a
+                        .group
+                        .title
+                        .to_ascii_lowercase()
+                        .contains("msedgewebview2"),
+                "helper got its own row: {:?}",
+                a.group
+            );
+        }
+    }
+
+    #[test]
+    fn webview2_helpers_count_toward_their_own_apps() {
+        // Regression (2026-10-21): three apps' WebView2 processes were merged
+        // into one "msedgewebview2" app and suggested as Busy, 58% CPU, 2.2 GB.
+        let procs = vec![
+            sized(
+                win(
+                    100,
+                    4242,
+                    "gg-coder-local-fork.exe",
+                    r"C:\Users\me\AppData\Local\Programs\gg-coder-local-fork\gg-coder-local-fork.exe",
+                    &["gg-coder-local-fork.exe"],
+                ),
+                300 * MB,
+            ),
+            webview(101, 100, 400 * MB, 10.0),
+            webview(102, 101, 200 * MB, 60.0), // nested helper -> helper
+            webview(103, 101, 100 * MB, 0.0),
+            sized(
+                win(
+                    200,
+                    4242,
+                    "handy.exe",
+                    r"C:\Program Files\Handy\handy.exe",
+                    &["handy.exe"],
+                ),
+                100 * MB,
+            ),
+            webview(201, 200, 150 * MB, 0.0),
+            webview(202, 201, 100 * MB, 0.0),
+            sized(
+                win(
+                    300,
+                    4242,
+                    "SearchApp.exe",
+                    r"C:\Windows\SystemApps\Microsoft.Windows.Search_cw5n1h2txyewy\SearchApp.exe",
+                    &["SearchApp.exe"],
+                ),
+                150 * MB,
+            ),
+            webview(301, 300, 200 * MB, 0.0),
+            webview(302, 301, 100 * MB, 0.0),
+        ];
+        let out = assess(
+            &procs,
+            &Context {
+                self_pid: 999,
+                watched_secs: 4 * HOUR,
+                ..Default::default()
+            },
+        );
+        no_helper_rows(&out);
+
+        let gg = group_with(&out, 100).expect("gg-coder group");
+        assert_eq!(gg.group.app_pid, Some(100));
+        assert_eq!(gg.group.root, 100);
+        for h in [101, 102, 103] {
+            assert!(gg.group.members.contains(&h), "gg-coder owns {h}");
+        }
+        assert_eq!(gg.group.memory, 1000 * MB);
+
+        let handy = group_with(&out, 200).expect("handy group");
+        assert_eq!(handy.group.app_pid, Some(200));
+        assert!(handy.group.members.contains(&201) && handy.group.members.contains(&202));
+        assert_eq!(handy.group.memory, 350 * MB);
+
+        let search = group_with(&out, 300).expect("search group");
+        assert_eq!(search.group.root, 300);
+        assert!(search.group.members.contains(&301) && search.group.members.contains(&302));
+        assert_eq!(search.group.memory, 450 * MB);
+        assert_eq!(search.verdict, Verdict::Protected(Protection::System));
+
+        // Every helper sits in exactly its owner's group.
+        for (h, owner) in [
+            (101, 100),
+            (102, 100),
+            (103, 100),
+            (201, 200),
+            (202, 200),
+            (301, 300),
+            (302, 300),
+        ] {
+            let holders: Vec<_> = out
+                .iter()
+                .filter(|a| a.group.members.contains(&h))
+                .collect();
+            assert_eq!(holders.len(), 1, "{h} in one group");
+            assert!(
+                holders[0].group.members.contains(&owner),
+                "{h} belongs to {owner}"
+            );
+        }
+    }
+
+    #[test]
+    fn helper_without_known_owner_is_hidden() {
+        // Parent gone.
+        let lost = webview(400, 4242, 900 * MB, 80.0);
+        // Parent's start time unknown: can't tell it really started the helper.
+        let mut host = sized(
+            win(
+                411,
+                4242,
+                "host.exe",
+                r"C:\Users\me\AppData\Local\Host\host.exe",
+                &["host.exe"],
+            ),
+            100 * MB,
+        );
+        host.start_time = 0;
+        let unverified = webview(410, 411, 900 * MB, 80.0);
+        // Parent pid reused by a newer app.
+        let mut reused = webview(420, 421, 900 * MB, 80.0);
+        reused.start_time = 2000;
+        let mut newer = win(
+            421,
+            4242,
+            "slack.exe",
+            r"C:\Users\me\AppData\Local\slack\app-4.41.0\slack.exe",
+            &["slack.exe"],
+        );
+        newer.start_time = 3000;
+        // A helper under another hidden helper stays hidden too.
+        let nested = webview(430, 400, 900 * MB, 80.0);
+        let out = assess(
+            &[lost, host, unverified, reused, newer, nested],
+            &Context {
+                self_pid: 999,
+                watched_secs: 4 * HOUR,
+                ..Default::default()
+            },
+        );
+        no_helper_rows(&out);
+        for h in [400, 410, 420, 430] {
+            assert!(group_with(&out, h).is_none(), "helper {h} has no group");
+        }
+        // Their would-be owners don't absorb them either.
+        assert_eq!(group_with(&out, 411).unwrap().group.members, vec![411]);
+        assert_eq!(group_with(&out, 421).unwrap().group.members, vec![421]);
+    }
+
+    #[test]
+    fn sampler_labels_helpers_with_their_owner() {
+        // Regression (2026-10-21): the fan view showed one "msedgewebview2.exe"
+        // culprit adding up gg-coder's, Handy's and SearchApp's WebView2 CPU.
+        let gg = win(
+            100,
+            4242,
+            "gg-coder-local-fork.exe",
+            r"C:\Users\me\AppData\Local\Programs\gg-coder-local-fork\gg-coder-local-fork.exe",
+            &["gg-coder-local-fork.exe"],
+        );
+        let handy = win(
+            200,
+            4242,
+            "handy.exe",
+            r"C:\Program Files\Handy\handy.exe",
+            &["handy.exe"],
+        );
+        let search = win(
+            300,
+            4242,
+            "SearchApp.exe",
+            r"C:\Windows\SystemApps\Microsoft.Windows.Search_cw5n1h2txyewy\SearchApp.exe",
+            &["SearchApp.exe"],
+        );
+        // Unverified owner: start time unknown.
+        let mut host = win(
+            411,
+            4242,
+            "host.exe",
+            r"C:\Users\me\AppData\Local\Host\host.exe",
+            &["host.exe"],
+        );
+        host.start_time = 0;
+        // Owner pid reused by a newer app.
+        let mut reused = webview(420, 421, 0, 0.0);
+        reused.start_time = 2000;
+        let mut newer = win(
+            421,
+            4242,
+            "slack.exe",
+            r"C:\Users\me\AppData\Local\slack\app-4.41.0\slack.exe",
+            &["slack.exe"],
+        );
+        newer.start_time = 3000;
+        // The helper's own start time unknown.
+        let mut blind = webview(440, 100, 0, 0.0);
+        blind.start_time = 0;
+        let procs = vec![
+            gg,
+            webview(101, 100, 0, 0.0),
+            webview(102, 101, 0, 0.0), // nested helper -> helper
+            handy,
+            webview(201, 200, 0, 0.0),
+            webview(202, 201, 0, 0.0),
+            search,
+            webview(301, 300, 0, 0.0),
+            webview(400, 4242, 0, 0.0), // parent gone
+            host,
+            webview(410, 411, 0, 0.0),
+            reused,
+            newer,
+            webview(430, 400, 0, 0.0), // under an ownerless helper
+            blind,
+        ];
+        let labels = reading_labels(&procs);
+        for (pid, want) in [
+            (100, "gg-coder-local-fork"),
+            (101, "gg-coder-local-fork"),
+            (102, "gg-coder-local-fork"),
+            (200, "handy"),
+            (201, "handy"),
+            (202, "handy"),
+            (300, "SearchApp.exe"),
+            (301, "SearchApp.exe"),
+            (400, "msedgewebview2.exe"),
+            (410, "msedgewebview2.exe"),
+            (420, "msedgewebview2.exe"),
+            (430, "msedgewebview2.exe"),
+            (440, "msedgewebview2.exe"),
+        ] {
+            assert_eq!(labels[&pid], want, "label of {pid}");
+        }
+    }
+
+    #[test]
+    fn butters_own_webview2_is_protected() {
+        let butters = win(
+            500,
+            4242,
+            "butters.exe",
+            r"C:\Users\me\AppData\Local\Butters\butters.exe",
+            &["butters.exe"],
+        );
+        let out = assess(
+            &[
+                butters,
+                webview(501, 500, 300 * MB, 70.0),
+                webview(502, 501, 900 * MB, 0.0),
+            ],
+            &Context {
+                self_pid: 500,
+                watched_secs: 4 * HOUR,
+                ..Default::default()
+            },
+        );
+        no_helper_rows(&out);
+        let me = group_with(&out, 500).expect("butters group");
+        assert!(me.group.members.contains(&501) && me.group.members.contains(&502));
+        assert_eq!(me.verdict, Verdict::Protected(Protection::ThisApp));
+        assert!(!Protection::ThisApp.user_closable());
+        assert!(group_with(&out, 501).is_some_and(|a| a.group.members.contains(&500)));
+    }
+
+    #[test]
+    fn unknown_start_time_is_not_a_verified_parent() {
+        // A Claude session under a shell whose start time couldn't be read:
+        // not joined to it, and not called a leftover either.
+        let mut shell = win(
+            600,
+            4242,
+            "cmd.exe",
+            r"C:\Windows\System32\cmd.exe",
+            &["cmd.exe"],
+        );
+        shell.start_time = 0;
+        shell.owned_by_user = false;
+        let claude = sized(
+            win(
+                601,
+                600,
+                "claude.exe",
+                r"C:\Users\me\.local\bin\claude.exe",
+                &["claude"],
+            ),
+            300 * MB,
+        );
+        // A dev server whose own start time is unknown, under a known launcher.
+        let npm = win(
+            610,
+            4242,
+            "node.exe",
+            r"C:\Program Files\nodejs\node.exe",
+            &[
+                "node",
+                r"C:\Program Files\nodejs\node_modules\npm\bin\npm-cli.js",
+                "run",
+                "dev",
+            ],
+        );
+        let mut vite = win(
+            611,
+            610,
+            "node.exe",
+            r"C:\Program Files\nodejs\node.exe",
+            &["node", r"C:\work\shop\node_modules\vite\bin\vite.js"],
+        );
+        vite.start_time = 0;
+        vite.ports = vec![5173];
+        let out = assess(
+            &[shell, claude, npm, vite],
+            &Context {
+                self_pid: 999,
+                ..Default::default()
+            },
+        );
+        let c = group_with(&out, 601).expect("claude group");
+        assert_eq!(c.group.root, 601);
+        assert!(!c.group.members.contains(&600));
+        assert!(!c.group.orphaned, "unknown parent is not a closed terminal");
+        assert!(!matches!(c.verdict, Verdict::Suggest { .. }));
+
+        let v = group_with(&out, 611).expect("vite group");
+        assert_eq!(v.group.root, 611);
+        assert!(!v.group.members.contains(&610));
+        assert!(!v.group.orphaned);
     }
 }

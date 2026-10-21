@@ -538,7 +538,11 @@ pub fn app_root(exe: &str) -> Option<String> {
     if windows_path {
         let lower = exe.to_ascii_lowercase();
         let n = base(exe);
-        if lower.starts_with("c:\\windows\\") || is_runtime(&n) || SHELLS.contains(&n.as_str()) {
+        if lower.starts_with("c:\\windows\\")
+            || is_runtime(&n)
+            || SHELLS.contains(&n.as_str())
+            || is_shared_helper(exe)
+        {
             return None;
         }
         if matches!(
@@ -550,6 +554,21 @@ pub fn app_root(exe: &str) -> Option<String> {
         return Some(exe.to_string());
     }
     None
+}
+
+/// A shared runtime helper that many apps start for themselves (WebView2,
+/// Crashpad, CEF/Qt web engines). It is part of whichever app started it,
+/// never an app of its own. Judged by the program file name only; inside a
+/// macOS `.app` bundle the bundle already says whose it is.
+pub fn is_shared_helper(exe: &str) -> bool {
+    !exe.contains(".app/")
+        && matches!(
+            base(exe).as_str(),
+            "msedgewebview2"
+                | "crashpad_handler"
+                | "cefsharp.browsersubprocess"
+                | "qtwebengineprocess"
+        )
 }
 
 pub const SIMULATOR_ROOT: &str = "CoreSimulator";
@@ -1285,5 +1304,25 @@ mod tests {
             &["node", "/Users/me/mcp-servers/github-mcp/index.js"],
         );
         assert_eq!(classify_cli(&own).unwrap().0, Kind::McpServer);
+    }
+
+    #[test]
+    fn shared_helpers_are_not_apps() {
+        for exe in [
+            r"C:\Program Files (x86)\Microsoft\EdgeWebView\Application\130.0.2849.80\msedgewebview2.exe",
+            r"C:\Users\me\AppData\Local\Programs\app\crashpad_handler.exe",
+            r"C:\Program Files\Foo\CefSharp.BrowserSubprocess.exe",
+            r"C:\Qt\6.8\bin\QtWebEngineProcess.exe",
+        ] {
+            assert!(is_shared_helper(exe), "{exe}");
+            assert_eq!(app_root(exe), None, "{exe}");
+        }
+        // Inside a macOS bundle, the bundle says whose helper it is.
+        let mac = "/Applications/Slack.app/Contents/Frameworks/Electron Framework.framework/Helpers/crashpad_handler";
+        assert!(!is_shared_helper(mac));
+        assert_eq!(app_root(mac).as_deref(), Some("/Applications/Slack.app"));
+        let slack = r"C:\Users\me\AppData\Local\slack\app-4.41.0\slack.exe";
+        assert!(!is_shared_helper(slack));
+        assert_eq!(app_root(slack).as_deref(), Some(slack));
     }
 }

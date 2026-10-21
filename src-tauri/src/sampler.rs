@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, Uid, UpdateKind};
 
-use crate::engine::classify::{app_name, app_root};
+use crate::engine::assess::reading_labels;
 use crate::engine::model::ProcInfo;
 use crate::platform::{self, Pressure, Thermal};
 use crate::trends::Reading;
@@ -100,6 +100,21 @@ impl Sampler {
     /// The user's own processes as of the last refresh, for leak watch and
     /// the fan view. App helpers are labelled with their app's name.
     pub fn readings(&self) -> Vec<Reading> {
+        // Every process, not only the user's, so ownership chains are whole.
+        let tree: Vec<ProcInfo> = self
+            .sys
+            .processes()
+            .iter()
+            .map(|(pid, p)| ProcInfo {
+                pid: pid.as_u32(),
+                parent: p.parent().map(|pp| pp.as_u32()),
+                start_time: p.start_time(),
+                name: p.name().to_string_lossy().into_owned(),
+                exe: p.exe().map(|e| e.to_string_lossy().into_owned()),
+                ..Default::default()
+            })
+            .collect();
+        let mut labels = reading_labels(&tree);
         let mut out = Vec::new();
         for (pid, p) in self.sys.processes() {
             let owned = matches!((&self.my_uid, p.user_id()), (Some(me), Some(them)) if me == them);
@@ -108,11 +123,8 @@ impl Sampler {
             }
             let key = (pid.as_u32(), p.start_time());
             let cpu = self.activity.get(&key).map(|a| a.cpu_pct).unwrap_or(0.0);
-            let label = p
-                .exe()
-                .map(|e| e.to_string_lossy().into_owned())
-                .and_then(|e| app_root(&e))
-                .map(|root| app_name(&root))
+            let label = labels
+                .remove(&key.0)
                 .unwrap_or_else(|| p.name().to_string_lossy().into_owned());
             let memory = platform::footprint(key.0).unwrap_or_else(|| p.memory());
             out.push(Reading {
