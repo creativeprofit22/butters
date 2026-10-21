@@ -184,6 +184,26 @@
         "Not checked: the gitleaks job has not run on GitHub yet (changes uncommitted); no new full secrets review"
       ]
     },
+    "security": {
+      "checkedAt": "2026-10-21T05:57:42.097Z",
+      "commit": "2a80b1a",
+      "uncommittedChanges": false,
+      "result": "pass",
+      "summary": "Code-and-config security review of the Tauri app, CI and release pipeline found no reportable findings (≥0.8 confidence); macOS-only code paths and runtime behaviour not exercised.",
+      "findings": [],
+      "evidence": [
+        "Skill: bulletproof full-review protocol (audit-protocol.md, platform-playbooks Desktop/CLI), report-only",
+        "Read tauri.conf.json (strict CSP, freezePrototype, pinned updater pubkey) + capabilities/panel.json (panel only, own commands)",
+        "Read actions.rs: pid+start-time re-check, same user, forbids 0/1/self/ancestors/frontmost, fails closed",
+        "Read services.rs: argv-only run(), id/image/model allowlists, rmi --, Ollama 127.0.0.1 no redirects",
+        "Read ci.yml + release.yml: SHA-pinned actions, persist-credentials false, read-only default perms",
+        "Ran pnpm audit (prod+all): no known vulnerabilities; cargo audit: exit 0, 5 allowed Linux-only warnings",
+        "git ls-files/log grep for keys+tokens: none; no {@html}/innerHTML/eval in src; E2E env gated by debug_assertions",
+        "Dropped 2 candidates: Windows PATH docker lookup (env trust), playground /bin/sh (not shipped)",
+        "Scope: Rust backend, Svelte sinks, Tauri config, CI/release workflows, dependency audits, secrets grep",
+        "Not checked: macOS code at runtime, local gitleaks (not installed), packaged signing, GitHub secret custody"
+      ]
+    },
     "tests": {
       "checkedAt": "2026-10-20T17:47:51.425Z",
       "commit": "a6540bc",
