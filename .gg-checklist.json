@@ -71,6 +71,23 @@
         "Not checked: command not run end to end; no git pre-commit hook, so plain git commit stays ungated"
       ]
     },
+    "data-safety": {
+      "checkedAt": "2026-10-21T06:29:53.369Z",
+      "commit": "19d6224",
+      "uncommittedChanges": true,
+      "result": "pass",
+      "summary": "Old-image caveat fixed by failing closed: on Docker's containerd store (or if the store can't be read) no old images are suggested. The --rm container fix is unchanged.",
+      "findings": [],
+      "evidence": [
+        "services.rs old_images_now: docker info DriverStatus; containerd snapshotter -> empty list; info failure -> None",
+        "Removal re-check (docker_remove_old_images) goes through old_images_now, so it is covered too",
+        "RUNTIME: cargo run --example docker on Docker 29.1.2 containerd -> old image versions: 0",
+        "cargo test --lib: 90 passed, 0 failed (new containerd_store_is_detected)",
+        "cargo clippy --all-targets -D warnings clean with and without playground; cargo fmt applied",
+        "Scope: re-check of the old-image caveat only",
+        "Not checked: classic-store RepoDigests behaviour at runtime (no classic-store Docker here)"
+      ]
+    },
     "dependencies": {
       "checkedAt": "2026-10-21T05:51:40.018Z",
       "commit": "1d9f8a3",

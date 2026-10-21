@@ -22,6 +22,9 @@ pub struct Container {
     pub started_at: Option<u64>,
     /// Network + disk bytes moved since it started (cumulative).
     pub io: u64,
+    /// Started with `--rm`: stopping it deletes it and its unnamed volumes.
+    /// Assumed true until `docker inspect` says otherwise.
+    pub auto_remove: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -226,6 +229,7 @@ pub fn docker_containers() -> Option<Vec<Container>> {
             name: c.names,
             image: c.image,
             status: c.status,
+            auto_remove: true,
             ..Default::default()
         })
         .collect();
@@ -257,19 +261,33 @@ pub fn docker_containers() -> Option<Vec<Container>> {
             }
         }
     }
-    // Start times, in one call. Ids are validated hex, passed as arguments.
-    let mut args = vec!["inspect", "--format", "{{.Id}} {{.State.StartedAt}}"];
+    // Start times and --rm, in one call. Ids are validated hex, passed as arguments.
+    let mut args = vec![
+        "inspect",
+        "--format",
+        "{{.Id}} {{.HostConfig.AutoRemove}} {{.State.StartedAt}}",
+    ];
     args.extend(containers.iter().map(|c| c.id.as_str()));
     if let Ok(out) = run(&docker, &args, Duration::from_secs(6)) {
         for line in out.lines() {
-            if let Some((id, started)) = line.split_once(' ')
+            if let Some((id, auto_remove, started)) = parse_inspect_line(line)
                 && let Some(c) = containers.iter_mut().find(|c| c.id == id)
             {
+                c.auto_remove = auto_remove;
                 c.started_at = parse_started(started);
             }
         }
     }
     Some(containers)
+}
+
+/// "<id> <AutoRemove> <StartedAt>" -> parts. Anything but "false" counts as
+/// auto-remove, so an unexpected answer never hides the warning.
+fn parse_inspect_line(line: &str) -> Option<(&str, bool, &str)> {
+    let mut parts = line.splitn(3, ' ');
+    let id = parts.next()?;
+    let auto_remove = parts.next()? != "false";
+    Some((id, auto_remove, parts.next().unwrap_or("")))
 }
 
 /// What Docker could give back on disk.
@@ -361,11 +379,13 @@ pub fn parse_ago(s: &str) -> Option<u64> {
 }
 
 /// Picks the old image versions that are safe to suggest: within one
-/// repository, every image except the newest, built 30+ days ago, and not
-/// used by any container (running or stopped). Pure, so it's testable.
+/// repository, every image except the newest, built 30+ days ago, not
+/// used by any container (running or stopped), and pulled from a registry
+/// (`pullable_ids`), so it can be pulled again. Pure, so it's testable.
 fn pick_old_images(
     lines: &[ImageLine],
     used_ids: &std::collections::HashSet<String>,
+    pullable_ids: &std::collections::HashSet<String>,
     now: u64,
 ) -> Vec<OldImage> {
     use std::collections::HashMap;
@@ -400,6 +420,7 @@ fn pick_old_images(
                 used_ids.contains(&l.id) || l.containers.trim().parse::<u32>().is_ok_and(|n| n > 0);
             if keep.contains(l.id.as_str())
                 || in_use
+                || !pullable_ids.contains(&l.id)
                 || created >= newest
                 || now.saturating_sub(created) < OLD_IMAGE_MIN_AGE
             {
@@ -425,7 +446,25 @@ pub fn is_image_ref(r: &str) -> bool {
         })
 }
 
+/// Whether `docker info`'s DriverStatus says images live in containerd's
+/// store. There, a locally built image reports its own manifest digest in
+/// RepoDigests, so we can't tell it from a pulled one.
+fn uses_containerd_store(driver_status: &str) -> bool {
+    driver_status.contains("io.containerd.snapshotter")
+}
+
 fn old_images_now(docker: &PathBuf, now: u64) -> Option<Vec<OldImage>> {
+    // Fail closed: if we can't tell the store, or it's containerd, we can't
+    // tell which images could be pulled back, so suggest none.
+    let status = run(
+        docker,
+        &["info", "--format", "{{json .DriverStatus}}"],
+        Duration::from_secs(6),
+    )
+    .ok()?;
+    if uses_containerd_store(&status) {
+        return Some(Vec::new());
+    }
     let images = run(
         docker,
         &["images", "--no-trunc", "--format", "{{json .}}"],
@@ -456,7 +495,28 @@ fn old_images_now(docker: &PathBuf, now: u64) -> Option<Vec<OldImage>> {
         let out = run(docker, &args, Duration::from_secs(8)).ok()?;
         used.extend(out.lines().map(|l| l.trim().to_string()));
     }
-    Some(pick_old_images(&lines, &used, now))
+    // Classic store: images with no registry digest were built here and
+    // can't be pulled back, so they're never suggested. If we can't tell,
+    // suggest nothing.
+    let mut image_ids: Vec<&str> = lines.iter().map(|l| l.id.as_str()).collect();
+    image_ids.sort_unstable();
+    image_ids.dedup();
+    let mut pullable = std::collections::HashSet::new();
+    if !image_ids.is_empty() {
+        let mut args = vec![
+            "image",
+            "inspect",
+            "--format",
+            "{{.Id}} {{len .RepoDigests}}",
+        ];
+        args.extend(image_ids.iter().filter(|i| is_image_ref(i)).copied());
+        let out = run(docker, &args, Duration::from_secs(8)).ok()?;
+        pullable.extend(out.lines().filter_map(|l| {
+            let (id, n) = l.trim().split_once(' ')?;
+            (n.parse::<u32>().ok()? > 0).then(|| id.to_string())
+        }));
+    }
+    Some(pick_old_images(&lines, &used, &pullable, now))
 }
 
 pub fn docker_disk() -> Option<DockerDisk> {
@@ -930,9 +990,31 @@ mod tests {
                 "1GB",
                 "0",
             ),
+            // built locally (no registry digest): can't be pulled back, kept
+            img(
+                "myapp",
+                "v1",
+                "sha256:l",
+                "2025-01-01 10:00:00 +0000 UTC",
+                "900MB",
+                "0",
+            ),
+            img(
+                "myapp",
+                "v2",
+                "sha256:m",
+                "2026-09-01 10:00:00 +0000 UTC",
+                "900MB",
+                "0",
+            ),
         ];
         let used: std::collections::HashSet<String> = ["sha256:i".to_string()].into();
-        let old = pick_old_images(&lines, &used, now);
+        let pullable: std::collections::HashSet<String> = lines
+            .iter()
+            .map(|l| l.id.clone())
+            .filter(|id| id != "sha256:l")
+            .collect();
+        let old = pick_old_images(&lines, &used, &pullable, now);
         let refs: Vec<&str> = old.iter().map(|o| o.reference.as_str()).collect();
         assert_eq!(
             refs,
@@ -945,6 +1027,36 @@ mod tests {
             old.iter().map(|o| o.size).sum::<u64>(),
             3_170_000_000 + 1_750_000_000
         );
+    }
+
+    #[test]
+    fn containerd_store_is_detected() {
+        // Docker 29.1.2 on Docker Desktop with the containerd image store.
+        assert!(uses_containerd_store(
+            r#"[["driver-type","io.containerd.snapshotter.v1"]]"#
+        ));
+        // Classic overlay2 graph driver.
+        assert!(!uses_containerd_store(
+            r#"[["Backing Filesystem","extfs"],["Supports d_type","true"]]"#
+        ));
+    }
+
+    #[test]
+    fn inspect_lines_read_auto_remove_and_fail_safe() {
+        assert_eq!(
+            parse_inspect_line("abc true 2026-10-01T10:00:00Z"),
+            Some(("abc", true, "2026-10-01T10:00:00Z"))
+        );
+        assert_eq!(
+            parse_inspect_line("abc false 2026-10-01T10:00:00Z"),
+            Some(("abc", false, "2026-10-01T10:00:00Z"))
+        );
+        // Unexpected value: treated as --rm, so the warning still shows.
+        assert_eq!(
+            parse_inspect_line("abc <no value> x").map(|p| p.1),
+            Some(true)
+        );
+        assert_eq!(parse_inspect_line("abc"), None);
     }
 
     #[test]

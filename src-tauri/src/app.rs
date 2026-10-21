@@ -658,6 +658,43 @@ fn do_scan_services(state: &AppState) -> ServicesResult {
     result
 }
 
+/// One idle container's card. A `--rm` container is deleted (with its
+/// unnamed volumes) when stopped, so it gets a caution note, which also keeps
+/// it out of the sweep, and is never pre-ticked.
+fn container_suggestion(
+    c: &services::Container,
+    idle: &crate::docker_activity::Idle,
+    id: String,
+    key: String,
+) -> Suggestion {
+    let detail = match &c.project {
+        Some(p) => format!("{} · {p}", c.image),
+        None => c.image.clone(),
+    };
+    Suggestion {
+        id,
+        key,
+        kind: Kind::DockerContainer,
+        title: format!("Container: {}", c.name),
+        detail: Some(detail),
+        reason: format!(
+            "No activity {}{}",
+            fmt_duration(idle.secs),
+            if idle.lower_bound { "+" } else { "" }
+        ),
+        note: c
+            .auto_remove
+            .then(|| "Stopping deletes it (--rm)".to_string()),
+        memory: c.memory,
+        cpu: c.cpu,
+        ports: Vec::new(),
+        recommended: idle.secs >= DAY && !c.auto_remove,
+        polite: true,
+        verb: "Stop",
+        disk: 0,
+    }
+}
+
 /// Containers measured quiet for an hour or more; a day pre-ticks them.
 fn container_cards(
     state: &AppState,
@@ -678,30 +715,7 @@ fn container_cards(
             continue;
         }
         let id = format!("d{seq}-{i}");
-        let detail = match &c.project {
-            Some(p) => format!("{} · {p}", c.image),
-            None => c.image.clone(),
-        };
-        suggestions.push(Suggestion {
-            id: id.clone(),
-            key: key.clone(),
-            kind: Kind::DockerContainer,
-            title: format!("Container: {}", c.name),
-            detail: Some(detail),
-            reason: format!(
-                "No activity {}{}",
-                fmt_duration(idle.secs),
-                if idle.lower_bound { "+" } else { "" }
-            ),
-            note: None,
-            memory: c.memory,
-            cpu: c.cpu,
-            ports: Vec::new(),
-            recommended: idle.secs >= DAY,
-            polite: true,
-            verb: "Stop",
-            disk: 0,
-        });
+        suggestions.push(container_suggestion(c, &idle, id.clone(), key.clone()));
         targets.insert(
             id,
             Target::Container {
@@ -1269,6 +1283,30 @@ mod tests {
             memory: MB,
         };
         assert_eq!(container.memory_kind(), Some(Kind::DockerContainer));
+    }
+
+    #[test]
+    fn auto_remove_containers_are_flagged_and_never_swept() {
+        let idle = crate::docker_activity::Idle {
+            secs: 2 * DAY,
+            lower_bound: false,
+        };
+        let mut c = services::Container {
+            id: "abc".into(),
+            name: "pg".into(),
+            image: "postgres:17".into(),
+            auto_remove: true,
+            ..Default::default()
+        };
+        let rm = container_suggestion(&c, &idle, "d1-0".into(), "docker:pg".into());
+        assert_eq!(rm.note.as_deref(), Some("Stopping deletes it (--rm)"));
+        assert!(!rm.recommended);
+        assert!(!sweepable(&rm));
+        c.auto_remove = false;
+        let kept = container_suggestion(&c, &idle, "d1-0".into(), "docker:pg".into());
+        assert_eq!(kept.note, None);
+        assert!(kept.recommended);
+        assert!(sweepable(&kept));
     }
 
     #[test]
