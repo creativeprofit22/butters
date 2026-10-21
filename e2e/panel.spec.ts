@@ -336,23 +336,30 @@ test.describe("closing feels instant", () => {
 
   test("rows warm the moment Close is pressed, and close in parallel", async ({ page }) => {
     await open(page, { suggestions: [mk("a", "Vite"), mk("b", "Next"), mk("c", "Storybook")], sweep: [] } as any);
-    // Make every close take 600 ms, like a real app quitting.
+    // Hold every close until the test lets go, like a real app quitting, and
+    // count how many are in flight. No wall-clock timing: it flaked under load.
     await page.evaluate(() => {
-      const i = (window as any).__TAURI_INTERNALS__;
+      const w = window as any;
+      const i = w.__TAURI_INTERNALS__;
       const o = i.invoke;
+      w.__inFlight = 0;
+      w.__closeGate = new Promise<void>((r) => (w.__openGate = r));
       i.invoke = async (c: string, a: unknown) => {
-        if (c === "close_item") await new Promise((r) => setTimeout(r, 600));
+        if (c === "close_item") {
+          w.__inFlight++;
+          await w.__closeGate;
+        }
         return o(c, a);
       };
     });
     await page.getByRole("button", { name: "Close 3" }).click();
-    const t0 = Date.now();
     await page.getByRole("button", { name: "Close", exact: true }).click();
-    // Instant feedback: all three rows are warm within a frame or two.
-    await expect(page.locator(".row.pending")).toHaveCount(3, { timeout: 150 });
-    // Parallel: all three are melting well before 3 × 600 ms.
-    await expect.poll(() => page.locator(".pat.melting").count(), { timeout: 1500 }).toBeGreaterThan(0);
-    expect(Date.now() - t0).toBeLessThan(1400);
+    // Instant feedback: all three rows are warm while no close has finished.
+    await expect(page.locator(".row.pending")).toHaveCount(3);
+    // Parallel: all three closes are under way at once, not one after another.
+    await expect.poll(() => page.evaluate(() => (window as any).__inFlight)).toBe(3);
+    await page.evaluate(() => (window as any).__openGate());
+    await expect.poll(() => page.locator(".pat.melting").count()).toBeGreaterThan(0);
   });
 
   test("no CSS blur filters on list rows (WebKit draws a magenta edge on them)", async ({ page }) => {
